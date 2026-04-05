@@ -1,0 +1,8 @@
+# Agentic guardrails — additional dependencies
+# Install alongside the root requirements.txt:
+#   pip install -r requirements.txt -r agentic_guardrails/requirements_agentic.txt
+
+# Retrieval tools
+ddgs>=9.0.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
