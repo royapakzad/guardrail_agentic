@@ -22,7 +22,8 @@ A research toolkit for studying how AI safety guardrails behave across languages
 10. [What the Delta Measures](#10-what-the-delta-measures)
 11. [The Three Retrieval Tools](#11-the-three-retrieval-tools)
 12. [Guardrail Backends Explained](#12-guardrail-backends-explained)
-13. [Common Issues](#13-common-issues)
+13. [Scenario Observability Logs](#13-scenario-observability-logs)
+14. [Common Issues](#14-common-issues)
 
 ---
 
@@ -42,12 +43,12 @@ python run_batch_guardrails_all.py \
   --input data/scenarios_sample_short.csv \
   --output-prefix outputs/test_run \
   --guardrail flowjudge \
-  --provider openai --model gpt-4o-mini \
+  --provider openai --model gpt-5-mini \
   --assistant-system-prompt-file config/assistant_system_prompt.txt \
   --policy-files config/policy.txt config/policy_fa.txt \
   --rubric-file config/rubric.txt
 
-# 4. Run the agentic comparison (same 4 scenarios, adds web retrieval)
+# 4. Run the agentic comparison (same 4 scenarios, adds web retrieval + per-scenario logs)
 python agentic_guardrails/run_agentic_comparison.py \
   --input data/scenarios_sample_short.csv \
   --output-prefix outputs/test_agentic \
@@ -58,6 +59,7 @@ python agentic_guardrails/run_agentic_comparison.py \
   --policy-files config/policy.txt config/policy_fa.txt \
   --rubric-file config/rubric.txt \
   --max-tool-calls 8 --verbose
+# Per-scenario logs are written automatically to outputs/test_agentic_logs/
 ```
 
 ---
@@ -263,6 +265,20 @@ multilingual_llm_guardrails-main/
 │   │                                 #   write_outputs() — writes .csv and .json files,
 │   │                                 #       creating parent directories as needed
 │   │
+│   ├── scenario_logger.py            # Per-scenario observability logger (new)
+│   │                                 #   ScenarioLogger — writes one .txt and one .json
+│   │                                 #       log file per scenario to the log directory
+│   │                                 #   Captures every step in sequence:
+│   │                                 #     1. Response generation: system prompt, user input,
+│   │                                 #        assistant response, provider/model
+│   │                                 #     2. Non-agentic guardrail: full input text + verdict
+│   │                                 #     3. Agentic guardrail:
+│   │                                 #        - Guardrail system prompt (policy + rubric)
+│   │                                 #        - Guardrail user message (conversation to eval)
+│   │                                 #        - Each tool call: name, input args, full result
+│   │                                 #        - Final raw LLM output + parsed verdict
+│   │                                 #     4. Comparison summary table
+│   │
 │   └── requirements_agentic.txt      # Additional packages for Part B:
 │                                     #   ddgs, requests, beautifulsoup4
 │
@@ -286,6 +302,11 @@ multilingual_llm_guardrails-main/
 │
 ├── results/                          # Prior run results (CSV files)
 ├── outputs/                          # All new run outputs are written here
+│   ├── <prefix>.csv                  # Batch results (one row per scenario)
+│   ├── <prefix>.json                 # Same results, native Python types
+│   └── <prefix>_logs/               # Per-scenario observability logs (auto-created)
+│       ├── scenario_<id>_<ts>.txt    # Human-readable step trace
+│       └── scenario_<id>_<ts>.json  # Machine-readable full log
 ├── requirements.txt                  # Python dependencies for Part A
 ├── .env                              # API keys — never commit this file
 └── .gitignore
@@ -428,7 +449,7 @@ python run_batch_guardrails_all.py \
   --output-prefix outputs/run_flowjudge_openai \
   --guardrail flowjudge \
   --provider openai \
-  --model gpt-4o-mini \
+  --model gpt-5-mini \
   --assistant-system-prompt-file config/assistant_system_prompt.txt \
   --policy-files config/policy.txt config/policy_fa.txt \
   --rubric-file config/rubric.txt \
@@ -444,7 +465,7 @@ python run_batch_guardrails_all.py \
   --output-prefix outputs/run_glider_openai \
   --guardrail glider \
   --provider openai \
-  --model gpt-4o-mini \
+  --model gpt-5-mini \
   --assistant-system-prompt-file config/assistant_system_prompt.txt \
   --policy-files config/policy.txt config/policy_fa.txt \
   --rubric-file config/rubric.txt \
@@ -460,7 +481,7 @@ python run_batch_guardrails_all.py \
   --output-prefix outputs/run_anyllm_openai \
   --guardrail anyllm \
   --provider openai \
-  --model gpt-4o-mini \
+  --model gpt-5-mini \
   --assistant-system-prompt-file config/assistant_system_prompt.txt \
   --policy-files config/policy.txt config/policy_fa.txt \
   --rubric-file config/rubric.txt
@@ -468,7 +489,7 @@ python run_batch_guardrails_all.py \
 
 ### Gemini
 
-Replace `--provider openai --model gpt-4o-mini` with `--provider gemini --model gemini-2.5-flash`. All other flags stay the same.
+Replace `--provider openai --model gpt-5-mini` with `--provider gemini --model gemini-2.5-flash`. All other flags stay the same.
 
 ### Mistral
 
@@ -479,6 +500,8 @@ Replace with `--provider mistral --model mistral-small-latest`.
 ## 8. Running the Agentic Comparison
 
 **Script:** `agentic_guardrails/run_agentic_comparison.py`
+
+Run from the project root (`multilingual_llm_guardrails-main/`):
 
 ```bash
 python agentic_guardrails/run_agentic_comparison.py \
@@ -496,6 +519,79 @@ python agentic_guardrails/run_agentic_comparison.py \
   --verbose
 ```
 
+This produces:
+- `outputs/agentic_run1.csv` — flat results table
+- `outputs/agentic_run1.json` — same results, native Python types
+- `outputs/agentic_run1_logs/` — per-scenario observability logs (see [Section 13](#13-scenario-observability-logs))
+
+### Guardrail backend variants
+
+**AnyLLM (simplest, no extra config needed):**
+```bash
+python agentic_guardrails/run_agentic_comparison.py \
+  --input data/scenarios_sample_short.csv \
+  --output-prefix outputs/agentic_anyllm \
+  --guardrail anyllm \
+  --provider openai --model gpt-4o-mini \
+  --guardrail-provider openai --guardrail-model gpt-4o \
+  --assistant-system-prompt-file config/assistant_system_prompt.txt \
+  --policy-files config/policy.txt config/policy_fa.txt \
+  --rubric-file config/rubric.txt \
+  --max-tool-calls 8 --verbose
+```
+
+**FlowJudge:**
+```bash
+python agentic_guardrails/run_agentic_comparison.py \
+  --input data/scenarios_sample_short.csv \
+  --output-prefix outputs/agentic_flowjudge \
+  --guardrail flowjudge \
+  --provider openai --model gpt-4o-mini \
+  --guardrail-provider openai --guardrail-model gpt-4o \
+  --assistant-system-prompt-file config/assistant_system_prompt.txt \
+  --policy-files config/policy.txt config/policy_fa.txt \
+  --rubric-file config/rubric.txt \
+  --flowjudge-criteria-file config/flowjudge_criteria.txt \
+  --max-tool-calls 8 --verbose
+```
+
+**Glider:**
+```bash
+python agentic_guardrails/run_agentic_comparison.py \
+  --input data/scenarios_sample_short.csv \
+  --output-prefix outputs/agentic_glider \
+  --guardrail glider \
+  --provider openai --model gpt-4o-mini \
+  --guardrail-provider openai --guardrail-model gpt-4o \
+  --assistant-system-prompt-file config/assistant_system_prompt.txt \
+  --policy-files config/policy.txt config/policy_fa.txt \
+  --rubric-file config/rubric.txt \
+  --glider-pass-criteria-file config/glider_pass_criteria.txt \
+  --glider-rubric-file config/glider_rubric.txt \
+  --max-tool-calls 8 --verbose
+```
+
+**Full dataset (all 60 scenarios), custom log directory:**
+```bash
+python agentic_guardrails/run_agentic_comparison.py \
+  --input data/scenarios.csv \
+  --output-prefix outputs/agentic_full_run \
+  --guardrail anyllm \
+  --provider openai --model gpt-4o-mini \
+  --guardrail-provider openai --guardrail-model gpt-4o \
+  --assistant-system-prompt-file config/assistant_system_prompt.txt \
+  --policy-files config/policy.txt config/policy_fa.txt \
+  --rubric-file config/rubric.txt \
+  --max-tool-calls 8 \
+  --log-dir outputs/my_scenario_logs \
+  --verbose
+```
+
+**Disable per-scenario logs:**
+```bash
+  --log-dir none
+```
+
 ### All CLI flags
 
 | Flag | Default | Purpose |
@@ -504,13 +600,14 @@ python agentic_guardrails/run_agentic_comparison.py \
 | `--output-prefix` | required | Output file prefix, e.g. `outputs/run1` — creates `.csv` and `.json` |
 | `--guardrail` | `flowjudge` | Guardrail backend for the non-agentic path: `flowjudge`, `glider`, or `anyllm` |
 | `--provider` | `openai` | Provider for the **assistant** LLM: `openai`, `gemini`, or `mistral` |
-| `--model` | `gpt-4o-mini` | Model name for the **assistant** |
+| `--model` | `gpt-5-mini` | Model name for the **assistant** |
 | `--assistant-system-prompt-file` | — | Path to the assistant system prompt file |
 | `--policy-files` | required | One or more policy files, e.g. `config/policy.txt config/policy_fa.txt` |
 | `--rubric-file` | — | Path to the scoring rubric file |
 | `--guardrail-provider` | same as `--provider` | Provider for the **judge** model used in both guardrail paths |
-| `--guardrail-model` | `gpt-4o-mini` | Model used for **both** non-agentic and agentic judge calls. Keep this constant across runs to isolate the effect of tool access, not model capability |
+| `--guardrail-model` | `gpt-5-mini` | Model used for **both** non-agentic and agentic judge calls. Keep this constant across runs to isolate the effect of tool access, not model capability |
 | `--max-tool-calls` | `5` | Hard cap on total tool calls per agentic evaluation. Set to `8` or higher when the LLM response contains multiple URLs, since Phase 2 uses one call per URL |
+| `--log-dir` | `<output-prefix>_logs/` | Directory for per-scenario observability logs. Each scenario gets a `.txt` and `.json` file. Pass `none` to disable logging entirely |
 | `--verbose` | off | Prints each tool call, its inputs, and results to the terminal in real time |
 | `--glider-pass-criteria-file` | — | Only with `--guardrail glider` |
 | `--glider-rubric-file` | — | Only with `--guardrail glider` |
@@ -519,7 +616,7 @@ python agentic_guardrails/run_agentic_comparison.py \
 
 ### Why separate `--guardrail-model` from `--model`?
 
-Using a different model for the judge (e.g., `gpt-4o`) than for the assistant (e.g., `gpt-4o-mini`) prevents the model from judging its own output. More importantly, it keeps the judge model identical across both the non-agentic and agentic paths — so the `score_delta` measures the effect of tool access, not the effect of a better model.
+Using a different model for the judge (e.g., `gpt-5`) than for the assistant (e.g., `gpt-5-mini`) prevents the model from judging its own output. More importantly, it keeps the judge model identical across both the non-agentic and agentic paths — so the `score_delta` measures the effect of tool access, not the effect of a better model.
 
 ### What `--verbose` shows
 
@@ -564,7 +661,7 @@ Both scripts write a `.csv` and a `.json` file to the path given in `--output-pr
 | Column | How it is produced | Meaning |
 |---|---|---|
 | `provider` | CLI `--provider` | LLM provider used for the assistant: `openai`, `gemini`, or `mistral` |
-| `model` | CLI `--model` | Model name used for the assistant, e.g. `gpt-4o-mini` |
+| `model` | CLI `--model` | Model name used for the assistant, e.g. `gpt-5-mini` |
 | `assistant_system_prompt` | content of `config/assistant_system_prompt.txt` | The system prompt the assistant received before the scenario |
 | `assistant_response` | `call_llm()` in `run_batch_guardrails_all.py` | The full text of the assistant's reply |
 | `guardrail_backend` | class name of the instantiated guardrail object | Which guardrail class handled evaluation, e.g. `AnyLlm`, `Glider`, `FlowJudge` |
@@ -709,6 +806,7 @@ All three tools are implemented in `agentic_guardrails/tools.py` and are availab
 
 ## 12. Guardrail Backends Explained
 
+
 Three backends are available for the non-agentic evaluation path, all from [Mozilla.ai's any-guardrail library](https://github.com/mozilla-ai/any-guardrail). They differ in how they structure the evaluation task internally.
 
 ### AnyLLM (`--guardrail anyllm`)
@@ -739,7 +837,126 @@ Requires: `--glider-pass-criteria-file config/glider_pass_criteria.txt` and eith
 
 ---
 
-## 13. Common Issues
+---
+
+## 13. Scenario Observability Logs
+
+Every run of `run_agentic_comparison.py` automatically writes a detailed trace log for each scenario to the log directory (default: `<output-prefix>_logs/`). These logs are designed for studying how the agentic guardrail works step by step — what it sees, what it decides to look up, what it finds, and how it arrives at its final judgment.
+
+### What is logged
+
+Each scenario produces two files:
+
+| File | Format | Best for |
+|---|---|---|
+| `scenario_<id>_<timestamp>.txt` | Human-readable text | Reading and studying the workflow |
+| `scenario_<id>_<timestamp>.json` | Structured JSON | Programmatic analysis, diffing runs |
+
+The `.txt` file captures every step in the order it happened:
+
+**Step 1 — Response Generation**
+- The system prompt sent to the assistant LLM
+- The user input (scenario text)
+- The assistant's full response
+- Provider and model used
+
+**Step 2A — Non-Agentic Guardrail**
+- The complete text block sent to the guardrail (policy + rubric + full conversation, as assembled by `build_guardrail_input_text()`)
+- The guardrail's verdict: `valid`, `score`, `explanation`
+
+**Step 2B — Agentic Guardrail**
+- The guardrail system prompt (which embeds the full policy text, rubric, and two-phase evaluation instructions)
+- The guardrail user message (the conversation to evaluate)
+- For each tool call, in order:
+  - Tool name (`search_web`, `fetch_url`, or `check_url_validity`)
+  - Full input arguments (query string or URL)
+  - Full tool result (search results list, fetched page text, or URL validity dict)
+- The raw final LLM output (the model's reasoning text before parsing)
+- Parsed verdict: `valid`, `score`, `explanation`, `tool_calls_made`
+- All sources used and URL check results
+
+**Comparison Summary**
+- Side-by-side table: non-agentic vs agentic `valid` and `score`
+- Score delta, whether judgment changed, whether tools were used
+
+### Example log snippet
+
+```
+══════════════════════ STEP 2B — AGENTIC GUARDRAIL  [policy: policy] ══════════════════════
+  Provider : openai  |  Model : gpt-4o  |  Max tool calls : 8
+
+──── GUARDRAIL SYSTEM PROMPT  (contains POLICY + RUBRIC + phase instructions) ────────────
+  You are an evaluation model. Your job is to judge whether an assistant's
+  response follows the policy and rubric provided below.
+  ...
+
+──── GUARDRAIL USER MESSAGE  (conversation to evaluate) ───────────────────────────────────
+  Please evaluate the following conversation.
+  === ASSISTANT SYSTEM PROMPT ===
+  ...
+
+────────────────── Tool Call #1 — search_web ──────────────────────────────────────────────
+  INPUT  : {"query": "Croatia mobile phone unlocking law border asylum seekers"}
+  ──── FULL RESULT ──────────────────────────────────────────────────────────────────────
+    [
+      {
+        "title": "Landmark ruling on mobile phone searches at EU borders",
+        "url": "https://www.hertie-school.org/...",
+        "snippet": "..."
+      },
+      ...
+    ]
+
+──────────────────── Tool Call #2 — check_url_validity ────────────────────────────────────
+  INPUT  : {"url": "https://www.hpc.hr"}
+  ──── FULL RESULT ──────────────────────────────────────────────────────────────────────
+    {
+      "url": "https://www.hpc.hr",
+      "valid": true,
+      "status_code": 200,
+      "final_url": "https://www.hpc.hr/",
+      "redirect_count": 1,
+      "error": null
+    }
+
+──── GUARDRAIL FINAL REASONING  (raw LLM output) ──────────────────────────────────────────
+  Phase 1: I searched for the Croatian phone-unlock law and found...
+  Phase 2: I checked the URL https://www.hpc.hr and it returned HTTP 200...
+  ```json
+  {"valid": true, "score": 0.85, "explanation": "The response correctly identifies..."}
+  ```
+
+  Parsed output:
+    valid           : True
+    score           : 0.85
+    tool_calls_made : 2
+```
+
+### How to use the logs for research
+
+- **Understand tool selection:** Look at which queries the model chose for Phase 1 to see how it identifies verifiable claims from an asylum-context response.
+- **Study URL verification:** Check Phase 2 tool calls against the assistant response to see which URLs triggered checks and what the results were.
+- **Trace judgment changes:** When `judgment_changed = True` in the comparison summary, read the raw final reasoning to see exactly what evidence caused the flip.
+- **Compare policies:** Because logs are written per scenario (not per policy), all policy evaluations for a scenario appear in the same file — making it easy to see how the same response is judged differently under the English vs Farsi policy.
+- **Debug tool failures:** If `agentic_tool_call_log` in the CSV shows empty results, the full result field in the `.txt` log shows the actual error returned by the tool.
+
+### Controlling log output
+
+```bash
+# Default: logs go to outputs/my_run_logs/
+python agentic_guardrails/run_agentic_comparison.py \
+  --output-prefix outputs/my_run ...
+
+# Custom log directory
+  --log-dir path/to/my_logs
+
+# Disable logs entirely
+  --log-dir none
+```
+
+---
+
+## 14. Common Issues
 
 ### `duckduckgo_search` package renamed
 
