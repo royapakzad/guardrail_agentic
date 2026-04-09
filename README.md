@@ -356,6 +356,7 @@ The additional packages in `requirements_agentic.txt` are:
 - `ddgs` — DuckDuckGo web search (no API key required), used by `search_web()`
 - `requests` — HTTP client used by `fetch_url()` and `check_url_validity()`
 - `beautifulsoup4` — HTML parser used by `fetch_url()` to extract readable text
+- `tiktoken` — OpenAI's tokenizer, used to count non-agentic guardrail tokens exactly from the input/output text we have (since the `any-guardrail` library does not expose `resp.usage`)
 
 ### API Keys
 
@@ -704,6 +705,11 @@ Produced by `run_guardrail_for_policy()` in `agentic_guardrails/guardrails_runne
 | `{label}_nonagentic_valid` | Boolean. Does the non-agentic guardrail consider the response compliant? Based solely on the model's built-in knowledge |
 | `{label}_nonagentic_score` | Compliance score from the non-agentic guardrail (0.0–1.0 per `config/rubric.txt`) |
 | `{label}_nonagentic_explanation` | The guardrail's free-text justification, with no access to external information |
+| `{label}_nonagentic_prompt_tokens` | Prompt tokens counted with `tiktoken` on `eval_input_text` — the same tokenizer the model uses. `eval_input_text` contains everything the guardrail reads: the role instruction, policy, rubric, assistant system prompt, scenario, and assistant response. For OpenAI GPT-4 family models this is exact; for other providers `cl100k_base` is used as a close approximation |
+| `{label}_nonagentic_completion_tokens` | Completion tokens counted with `tiktoken` on `gr.explanation` — the reasoning and justification text the guardrail returned |
+| `{label}_nonagentic_total_tokens` | Sum of the two above. Directly comparable to `{label}_agentic_total_tokens` to measure the token cost multiplier of adding retrieval |
+
+> **Why tiktoken and not `resp.usage`?** The `any-guardrail` library makes the LLM call internally and returns only a `GuardrailOutput` (valid, score, explanation) — `resp.usage` is not exposed. However, since we built `eval_input_text` ourselves and we have the full `gr.explanation` text, counting their tokens with tiktoken gives the same result that `resp.usage` would report. The counts are exact for OpenAI models because tiktoken is OpenAI's own tokenizer.
 
 #### Agentic path columns (one set per policy label)
 
@@ -726,6 +732,30 @@ The judge scans the assistant response for every URL or web address and calls `c
 | `{label}_agentic_url_checks` | List of results from every `check_url_validity` call, stored in `AgenticJudgment.url_checks` in `agentic_runner.py` | One dict per URL checked. Each dict contains: `url` (the original URL), `valid` (bool), `status_code` (int or null), `final_url` (URL after redirects), `redirect_count` (int), `error` (string or null). Empty list `[]` if no URLs appeared in the assistant response. JSON-encoded in CSV; native list in JSON |
 
 **Note on `{label}_agentic_url_checks` being empty:** With the default minimal system prompt (`"You are an assistant."`), the LLM rarely includes hyperlinks in its responses. An empty `url_checks` list is expected and correct — it means Phase 2 found nothing to check, not that something went wrong. The full URL checking pipeline runs on every response that does contain links.
+
+#### Agentic token usage columns (one set per policy label)
+
+Exact token counts from the provider API, summed across all LLM turns in the agentic loop. `None` if the provider did not return usage metadata.
+
+| Column | How it is produced | Meaning |
+|---|---|---|
+| `{label}_agentic_prompt_tokens_total` | Sum of `resp.usage.prompt_tokens` across all turns | **Tokens read in** — the total context window consumed across all turns. Grows each turn as tool results are appended to the conversation history |
+| `{label}_agentic_completion_tokens_total` | Sum of `resp.usage.completion_tokens` across all turns | **Tokens generated** — reasoning text, tool call requests, and the final verdict JSON, combined |
+| `{label}_agentic_total_tokens` | Prompt + completion | Total API token spend for the full agentic evaluation of this scenario under this policy |
+| `{label}_agentic_peak_prompt_tokens` | `max(prompt_tokens)` across all turns | **Context window high-water mark** — the single largest prompt seen in any one turn. Compare against the model's context limit (e.g. 128k for GPT-4o) to understand headroom. Increases with each tool call as results accumulate in the conversation |
+| `{label}_agentic_token_usage_per_turn` | List built in the tool loop | Per-turn breakdown: `[{"turn": 1, "prompt_tokens": N, "completion_tokens": N, "total_tokens": N, "has_tool_calls": true/false}, ...]`. Shows how the context window fills up turn by turn. JSON-encoded in CSV; native list in JSON |
+
+**Reading the token columns together:**
+
+```
+non-agentic path:  {label}_nonagentic_total_tokens tokens   (tiktoken on known text — exact for OpenAI)
+agentic path:      {label}_agentic_total_tokens tokens       (resp.usage from API — exact)
+
+multiplier    = agentic_total / nonagentic_total  →  how many times more expensive is agentic?
+peak context  = agentic_peak_prompt_tokens        →  how close did it get to the context window limit?
+```
+
+The `📈 Token Usage` tab in the Streamlit dashboard (`visualize_results.py`) shows all of these comparisons visually, including a per-turn context window growth chart.
 
 #### Comparison columns (one set per policy label)
 
