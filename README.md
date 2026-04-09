@@ -30,40 +30,7 @@ A research toolkit for studying how AI safety guardrails behave across languages
 
 ---
 
-## Quick Start
 
-```bash
-# 1. Install dependencies
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-pip install -r agentic_guardrails/requirements_agentic.txt
-
-# 2. Add API keys to .env
-echo "OPENAI_API_KEY=sk-..." >> .env
-
-# 3. Run the baseline evaluation (4 scenarios, OpenAI, FlowJudge guardrail)
-python run_batch_guardrails_all.py \
-  --input data/scenarios_sample_short.csv \
-  --output-prefix outputs/test_run \
-  --guardrail flowjudge \
-  --provider openai --model gpt-5-mini \
-  --assistant-system-prompt-file config/assistant_system_prompt.txt \
-  --policy-files config/policy.txt config/policy_fa.txt \
-  --rubric-file config/rubric.txt
-
-# 4. Run the agentic comparison (same 4 scenarios, adds web retrieval + per-scenario logs)
-python agentic_guardrails/run_agentic_comparison.py \
-  --input data/scenarios_sample_short.csv \
-  --output-prefix outputs/test_agentic \
-  --guardrail anyllm \
-  --provider openai --model gpt-4o-mini \
-  --guardrail-provider openai --guardrail-model gpt-4o \
-  --assistant-system-prompt-file config/assistant_system_prompt.txt \
-  --policy-files config/policy.txt config/policy_fa.txt \
-  --rubric-file config/rubric.txt \
-  --max-tool-calls 8 --verbose
-# Per-scenario logs are written automatically to outputs/test_agentic_logs/
-```
 
 ---
 
