@@ -28,8 +28,6 @@ A research toolkit for studying how AI safety guardrails behave across languages
 13. [Scenario Observability Logs](#13-scenario-observability-logs)
 14. [Common Issues](#14-common-issues)
 
----
-
 
 
 ---
