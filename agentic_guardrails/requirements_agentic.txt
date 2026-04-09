@@ -1,0 +1,17 @@
+# Agentic guardrails — additional dependencies
+# Install alongside the root requirements.txt:
+#   pip install -r requirements.txt -r agentic_guardrails/requirements_agentic.txt
+#
+# any-llm-sdk (already in requirements.txt) provides the unified LLM interface.
+# The agentic runner uses it with tool/function calling enabled.
+
+# Retrieval tools
+ddgs>=9.0.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# Token counting — exact token counts for OpenAI/GPT-4 family models (cl100k_base / o200k_base).
+# Used for the non-agentic guardrail path where the any-guardrail library does not expose
+# resp.usage. We count tokens directly from the input and output text we have.
+# For non-OpenAI providers the cl100k_base encoding is used as a close approximation.
+tiktoken>=0.7.0
