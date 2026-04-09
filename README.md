@@ -1,6 +1,9 @@
 # Multilingual LLM Guardrail Evaluation
 
-A research toolkit for studying how AI safety guardrails behave across languages — and whether giving a guardrail access to live web retrieval and URL verification changes the quality of its safety judgments.
+A research toolkit for studying how AI safety guardrails behave across languages, and whether giving a guardrail access to live web retrieval and URL verification changes the quality of its safety judgments.
+
+<img width="2720" height="4480" alt="Pipeline_Diagram_v4" src="https://github.com/user-attachments/assets/8bb8f987-ae33-4417-8f34-4d90e2186001" />
+
 
 ---
 
