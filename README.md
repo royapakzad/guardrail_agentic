@@ -1,6 +1,6 @@
 # Multilingual LLM Guardrail Evaluation
 
-A research toolkit for studying how AI safety guardrails behave across languages, and whether giving a guardrail access to agentic capabilities such as live web retrieval, URL verification, database lookups changes the quality of its safety judgments.
+A research toolkit for studying how AI safety guardrails behave across languages, and whether giving a guardrail access to agentic capabilities such as live web retrieval, URL verification, database lookups, and other custom tools changes the quality of its safety judgments.
 
 <img width="2720" height="4480" alt="Pipeline_Diagram_v5" src="https://github.com/user-attachments/assets/2736815d-8dd6-4cd1-b834-059a027fa7ef" />
 
@@ -34,14 +34,14 @@ A research toolkit for studying how AI safety guardrails behave across languages
 
 ## 1. What This Project Does
 
-This project sends text-based scenarios — questions and situations that real asylum seekers or case workers might encounter — to a large language model (LLM) and then evaluates whether the model's response is safe, accurate, fair, and policy-compliant. That evaluation step is called a **guardrail**.
+This project sends text-based scenarios — questions and situations that happen within real contexts, such as asylum speakers seeking information — to a large language model (LLM) and then evaluates whether the model's response is safe, accurate, fair, and policy-compliant. That evaluation step is called a **guardrail**.
 
 The project has two modes:
 
 **Mode A (Baseline):** Run scenarios through an assistant LLM and score each response using a guardrail. Test across multiple providers (OpenAI, Gemini, Mistral), multiple guardrail types (AnyLLM, FlowJudge, Glider), and multiple languages (English + Farsi).
 
 **Mode B (Agentic Comparison):** Run the same pipeline, but evaluate each response with *two* guardrails side by side:
-- A **non-agentic** guardrail that scores the response using only its built-in knowledge.
+- A **non-agentic** guardrail that scores the response using only its built-in knowledge (i.e. its training data).
 - An **agentic** guardrail that can actively search the web, fetch documents, and check whether URLs cited in the response actually resolve — before issuing a judgment.
 
 The outputs of both paths are recorded together so they can be compared row by row.
