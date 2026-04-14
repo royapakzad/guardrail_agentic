@@ -37,9 +37,18 @@ def compare_judgments(
     agentic_judgment: AgenticJudgment,
 ) -> ComparisonResult:
     """
-    Derive comparison fields from the two guardrail paths.
+    Derive the three comparison columns from the two guardrail paths.
+
+    Called once per (row, policy) pair after both paths have completed.
+    Returns None for score_delta and judgment_changed if either path errored
+    and produced no score or valid flag.
     """
-    # Score delta
+    # score_delta: primary research metric.
+    # Positive  → agentic scored the response higher after retrieval
+    #             (e.g. found evidence confirming the assistant's claims)
+    # Negative  → agentic scored it lower
+    #             (e.g. found a broken URL or contradicted a factual claim)
+    # None      → at least one path failed to produce a numeric score
     if nonagentic_score is not None and agentic_judgment.score is not None:
         score_delta: Optional[float] = round(
             agentic_judgment.score - nonagentic_score, 4
@@ -47,7 +56,8 @@ def compare_judgments(
     else:
         score_delta = None
 
-    # Did the binary judgment flip?
+    # judgment_changed: did the binary pass/fail decision flip between paths?
+    # True = the strongest possible signal that retrieval changed the outcome.
     if nonagentic_valid is not None and agentic_judgment.valid is not None:
         judgment_changed: Optional[bool] = agentic_judgment.valid != nonagentic_valid
     else:
@@ -56,6 +66,8 @@ def compare_judgments(
     return ComparisonResult(
         score_delta=score_delta,
         judgment_changed=judgment_changed,
+        # True if the agentic judge called at least one tool; False means
+        # score_delta reflects prompt differences, not actual retrieval.
         agentic_used_tools=agentic_judgment.tool_calls_made > 0,
         sources_used=agentic_judgment.sources_used,
     )

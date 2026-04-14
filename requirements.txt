@@ -1,6 +1,8 @@
+streamlit>=1.35.0               # interactive results dashboard (visualize_results.py)
+pandas>=2.0.0                   # used by the dashboard for tables
 any-guardrail                   # base package
 any-guardrail[flowjudge,huggingface]==0.2.2
-openai==2.8.1
+any-llm-sdk[openai,anthropic,google,mistral]<1  # mozilla-ai unified LLM interface; any-guardrail 0.2.2 requires <1
 python-dotenv==1.2.1
 
 # Numerical / scientific

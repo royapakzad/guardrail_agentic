@@ -150,11 +150,16 @@ def check_url_validity(url: str) -> dict:
             "error": str(exc),
         }
 
-    # Validity definition for URL fact-checking purposes:
-    #   < 400         → valid  (success or redirect that resolved)
-    #   401 / 403     → valid  (server responded; URL exists but requires auth or blocks bots)
+    # Validity rule for URL fact-checking purposes:
+    #   < 400         → valid  (2xx success or 3xx redirect that resolved)
+    #   401 / 403     → valid  (server responded; the URL exists but requires
+    #                           auth or is blocking automated requests — the
+    #                           resource is real, just access-restricted)
     #   404 / 410     → invalid (page genuinely does not exist)
-    #   5xx           → invalid (server error; URL may be broken)
+    #   5xx           → invalid (server error; URL may be broken or fabricated)
+    # This is intentionally permissive for 401/403 so the agentic guardrail
+    # does not incorrectly penalise responses that cite legitimate but
+    # login-gated resources (e.g. government portals, legal databases).
     status = resp.status_code
     valid = status < 400 or status in (401, 403)
 

@@ -7,7 +7,7 @@ import argparse
 from typing import Dict, Any, List, Optional, Tuple
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from any_llm import completion as _any_llm_completion
 from any_guardrail import AnyGuardrail, GuardrailName, GuardrailOutput
 
 
@@ -111,55 +111,33 @@ def call_llm(
     system_prompt: str,
     model: str,
     provider: str,
-    temperature: float = 0.0,
+    temperature: float | None = None,
 ) -> str:
     """
-    Call a chat model and return the assistant's message content.
+    Call a chat model via mozilla-ai/any-llm-sdk and return the assistant's
+    message content.
 
-    provider: "openai" | "gemini" | "mistral"
+    API keys are read automatically from environment variables:
+        OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, MISTRAL_API_KEY, …
 
-    Environment variables expected:
-        - openai:  OPENAI_API_KEY   
-        - gemini:  GEMINI_API_KEY
-        - mistral: MISTRAL_API_KEY
+    Supported providers include: openai, anthropic, gemini, mistral, cohere,
+    deepseek, cerebras, ollama (and 30+ more via any-llm-sdk).
+
+    temperature defaults to None (use the model's API default). Some models
+    (gpt-5-mini, o-series) reject explicit temperature values.
     """
-    provider = provider.lower()
-
-    if provider == "openai":
-        # Standard OpenAI client; uses OPENAI_API_KEY and default base URL.
-        client = OpenAI()
-
-    elif provider == "gemini":
-        # Gemini OpenAI-compatible endpoint.
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise RuntimeError("GEMINI_API_KEY is not set in the environment.")
-        client = OpenAI(
-            api_key=api_key,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        )
-
-    elif provider == "mistral":
-        # Mistral OpenAI-compatible endpoint.
-        api_key = os.environ.get("MISTRAL_API_KEY")
-        if not api_key:
-            raise RuntimeError("MISTRAL_API_KEY is not set in the environment.")
-        client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.mistral.ai/v1",
-        )
-
-    else:
-        raise ValueError(f"Unknown provider: {provider!r}")
-
-    resp = client.chat.completions.create(
+    kwargs: dict = dict(
+        provider=provider.lower(),
         model=model,
-        temperature=temperature,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ],
     )
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+
+    resp = _any_llm_completion(**kwargs)
     return resp.choices[0].message.content or ""
 
 
@@ -269,24 +247,29 @@ def process_row(
     rubric: str,
 ) -> Dict[str, Any]:
     """
-    Process one CSV row.
+    Process one CSV row end-to-end:
+      1. Call the assistant LLM once with the scenario text.
+      2. Run the guardrail against each policy file.
+      3. Return a flat dict with all input columns plus all output columns.
 
     Required column:
         - scenario: the text that will be used as the user message.
 
-    Any other columns are copied through to the output.
+    Any other columns are copied through to the output unchanged.
 
-    For each policy, we add separate columns:
-        <policy_label>_guardrail_valid
-        <policy_label>_guardrail_score
-        <policy_label>_guardrail_explanation
+    For each policy, three columns are added:
+        <policy_label>_guardrail_valid        – bool, did the response pass?
+        <policy_label>_guardrail_score        – numeric compliance score
+        <policy_label>_guardrail_explanation  – free-text justification
     """
     if "scenario" not in row:
         raise ValueError("Input CSV row missing 'scenario' column.")
 
     scenario = row["scenario"]
 
-    # 1) Call main assistant ONCE
+    # Step 1: send the scenario to the assistant LLM and get its response.
+    # The same response is then evaluated against every policy — the assistant
+    # is only called once per row to keep costs down and ensure consistency.
     assistant_response = call_llm(
         user_message=scenario,
         system_prompt=assistant_system_prompt,
@@ -294,18 +277,24 @@ def process_row(
         provider=provider,
     )
 
-    out: Dict[str, Any] = dict(row)  # start with original columns
+    # Start building the output dict from the original CSV columns, then
+    # append all the new metadata and evaluation columns.
+    out: Dict[str, Any] = dict(row)  # copy original columns through unchanged
     out.update(
         {
             "provider": provider,
             "model": model,
             "assistant_system_prompt": assistant_system_prompt,
             "assistant_response": assistant_response,
+            # Record which guardrail class handled evaluation (AnyLlm / Glider / FlowJudge)
             "guardrail_backend": type(guardrail).__name__,
         }
     )
 
-    # 2) Evaluate with each policy
+    # Step 2: evaluate the response against each policy in turn.
+    # Running multiple policies on the same response lets us compare how the
+    # same guardrail scores the response under the English vs Farsi policy —
+    # an identical policy text, just written in a different language.
     for policy_label, policy_text in policies:
         gr = run_guardrail_for_policy(
             guardrail=guardrail,
@@ -316,10 +305,9 @@ def process_row(
             assistant_response=assistant_response,
         )
 
-        # Use label-based column names, e.g.:
-        #   policy_guardrail_valid
-        #   policy_fa_guardrail_valid
-        base = policy_label  # e.g. "policy", "policy_fa"
+        # Write three columns per policy, prefixed with the policy file name
+        # (without extension), e.g. "policy_guardrail_valid" / "policy_fa_guardrail_valid"
+        base = policy_label  # derived from filename, e.g. "policy" or "policy_fa"
         out[f"{base}_guardrail_valid"] = gr.valid
         out[f"{base}_guardrail_score"] = gr.score
         out[f"{base}_guardrail_explanation"] = gr.explanation
@@ -328,14 +316,9 @@ def process_row(
 
 
 def main() -> None:
+    # Load environment variables from .env so API keys are available
+    # without needing to export them in the shell.
     load_dotenv()
-
-    # For OpenAI provider we definitely need OPENAI_API_KEY.
-    # For other providers we validate inside call_llm.
-    if not os.getenv("OPENAI_API_KEY"):
-        print(
-            "Warning: OPENAI_API_KEY is not set. This is required when provider=openai."
-        )
 
     parser = argparse.ArgumentParser(
         description="Run a batch of scenarios through an assistant model and "
@@ -361,16 +344,16 @@ def main() -> None:
     parser.add_argument(
         "--provider",
         default="openai",
-        choices=["openai", "gemini", "mistral"],
+        choices=["openai", "anthropic", "gemini", "mistral", "cohere", "deepseek", "cerebras", "ollama"],
         help="LLM provider for the assistant model (default: openai).",
     )
     parser.add_argument(
         "--model",
-        default="gpt-4o-mini",
+        default="gpt-5-mini",
         help=(
             "Chat model name for the assistant. "
             "Examples:\n"
-            "  openai:  gpt-4o-mini\n"
+            "  openai:  gpt-5-mini  (fast, available on free tier)\n"
             "  gemini:  gemini-2.5-flash\n"
             "  mistral: mistral-small-latest"
         ),
@@ -427,19 +410,28 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Load assistant system prompt
+    # --- Load configuration files -------------------------------------------
+
+    # The assistant system prompt is prepended to every scenario before the
+    # assistant LLM sees it. A minimal prompt keeps responses unbiased for
+    # research purposes; a more specific prompt changes the nature of responses.
     assistant_system_prompt = load_text_file(
         args.assistant_system_prompt_file, default=""
     )
 
-    # Load main rubric (used for eval text and for AnyLLM if desired)
+    # The rubric tells the guardrail how to map response quality to a score.
+    # It is embedded in the evaluation text that all three backends receive.
     rubric = load_text_file(args.rubric_file, default="")
 
-    # Load Glider-specific configuration (only relevant when --guardrail glider)
+    # --- Guardrail-specific configuration -----------------------------------
+    # Each guardrail backend needs slightly different setup. Load the relevant
+    # config only for the selected backend to avoid unnecessary file reads.
+
     glider_pass_criteria = ""
     glider_rubric = ""
 
     if args.guardrail == "glider":
+        # Glider requires an explicit pass/fail criterion and a scoring rubric.
         if not args.glider_pass_criteria_file:
             raise ValueError(
                 "When using --guardrail glider, you must provide "
@@ -451,7 +443,7 @@ def main() -> None:
                 f"Glider pass criteria file is empty or missing: {args.glider_pass_criteria_file}"
             )
 
-        # Glider scoring rubric: either its own file, or fall back to the main rubric.
+        # Glider can use its own rubric file or fall back to the shared rubric.
         if args.glider_rubric_file:
             glider_rubric = load_text_file(args.glider_rubric_file, default="")
             if not glider_rubric:
@@ -459,7 +451,7 @@ def main() -> None:
                     f"Glider rubric file is empty or missing: {args.glider_rubric_file}"
                 )
         else:
-            # Reuse main rubric if provided
+            # Re-use the main rubric if no Glider-specific file was provided.
             if not rubric:
                 raise ValueError(
                     "When using --guardrail glider, either --glider-rubric-file or "
@@ -467,7 +459,8 @@ def main() -> None:
                 )
             glider_rubric = rubric
 
-    # Load FlowJudge-specific criteria (only relevant when --guardrail flowjudge)
+    # FlowJudge optionally takes a criteria description. If not provided,
+    # create_guardrail() falls back to a sensible default.
     flowjudge_metric_name = args.flowjudge_metric_name
     flowjudge_criteria = None
     if args.guardrail == "flowjudge":
@@ -478,17 +471,23 @@ def main() -> None:
                     f"FlowJudge criteria file is empty or missing: {args.flowjudge_criteria_file}"
                 )
 
-    # Load policies and assign labels based on file name (without extension)
+    # --- Load policy files --------------------------------------------------
+    # Each policy file produces its own set of output columns, named after the
+    # file (without extension). Passing policy.txt and policy_fa.txt runs the
+    # same evaluation under both the English and Farsi versions of the policy,
+    # enabling direct comparison of how language affects guardrail scoring.
     policies: List[Tuple[str, str]] = []
     for policy_path in args.policy_files:
         text = load_text_file(policy_path, default="")
         if not text:
             raise ValueError(f"Policy file is empty or missing: {policy_path}")
         base_name = os.path.basename(policy_path)
-        label = os.path.splitext(base_name)[0]  # e.g. policy.txt -> "policy"
+        label = os.path.splitext(base_name)[0]  # e.g. policy.txt → "policy"
         policies.append((label, text))
 
-    # Create guardrail backend
+    # --- Instantiate the guardrail backend ----------------------------------
+    # create_guardrail() builds the correct AnyGuardrail subclass with the
+    # appropriate constructor arguments for the chosen backend.
     guardrail = create_guardrail(
         args.guardrail,
         glider_pass_criteria=glider_pass_criteria if args.guardrail == "glider" else None,
@@ -501,7 +500,7 @@ def main() -> None:
         else None,
     )
 
-    # Read input CSV
+    # --- Read the input CSV -------------------------------------------------
     with open(args.input, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows_in = list(reader)
@@ -509,6 +508,9 @@ def main() -> None:
     if not rows_in:
         raise RuntimeError(f"No rows found in input CSV: {args.input}")
 
+    # --- Main processing loop -----------------------------------------------
+    # Each row is processed independently. Errors are caught per-row so one
+    # failed API call does not abort the whole run.
     rows_out: List[Dict[str, Any]] = []
     total = len(rows_in)
     for idx, row in enumerate(rows_in, start=1):
@@ -524,15 +526,21 @@ def main() -> None:
                 rubric=rubric,
             )
         except Exception as e:
+            # On error, preserve the original row and record the error message
+            # so the output file can be inspected to diagnose the problem.
             out_row = dict(row)
             out_row["error"] = str(e)
         rows_out.append(out_row)
 
-    # Write outputs
+    # --- Write output files -------------------------------------------------
+    # Both CSV and JSON are written to allow easy spreadsheet analysis (CSV)
+    # and programmatic access to nested fields like lists/dicts (JSON).
     csv_path = args.output_prefix + ".csv"
     json_path = args.output_prefix + ".json"
     os.makedirs(os.path.dirname(csv_path) or ".", exist_ok=True)
 
+    # Collect the union of all keys across all rows (different rows may have
+    # different columns if some rows errored before all columns were written).
     fieldnames = sorted({k for r in rows_out for k in r.keys()})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:

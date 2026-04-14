@@ -1,73 +1,72 @@
 """
 providers.py
 ------------
-LLM client factory and plain chat-completion helper.
-Supports OpenAI, Gemini (via OpenAI-compatible endpoint), and Mistral.
+LLM call helper built on mozilla-ai/any-llm-sdk.
+
+any-llm-sdk provides a single unified interface for 40+ providers.
+API keys are read automatically from environment variables:
+  - OPENAI_API_KEY       (openai)
+  - ANTHROPIC_API_KEY    (anthropic)
+  - GEMINI_API_KEY       (gemini)
+  - MISTRAL_API_KEY      (mistral)
+  - COHERE_API_KEY       (cohere)
+  - DEEPSEEK_API_KEY     (deepseek)
+  - CEREBRAS_API_KEY     (cerebras)
+  Ollama runs locally and needs no key.
+
+Install:
+  pip install 'any-llm-sdk[openai,anthropic,google,mistral]'
+  pip install 'any-llm-sdk[all]'   # all providers
 """
 from __future__ import annotations
 
-import os
-from openai import OpenAI
+from any_llm import completion as _completion
 
-
-SUPPORTED_PROVIDERS = ("openai", "gemini", "mistral")
-
-
-def build_client(provider: str) -> OpenAI:
-    """
-    Return an OpenAI-compatible client for the given provider.
-
-    Reads OPENAI_API_KEY / GEMINI_API_KEY / MISTRAL_API_KEY from the environment.
-    Raises RuntimeError if the required key is absent.
-    """
-    provider = provider.lower()
-
-    if provider == "openai":
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            raise RuntimeError("OPENAI_API_KEY is not set in the environment.")
-        return OpenAI(api_key=api_key)
-
-    if provider == "gemini":
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise RuntimeError("GEMINI_API_KEY is not set in the environment.")
-        return OpenAI(
-            api_key=api_key,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        )
-
-    if provider == "mistral":
-        api_key = os.environ.get("MISTRAL_API_KEY")
-        if not api_key:
-            raise RuntimeError("MISTRAL_API_KEY is not set in the environment.")
-        return OpenAI(
-            api_key=api_key,
-            base_url="https://api.mistral.ai/v1",
-        )
-
-    raise ValueError(
-        f"Unknown provider: {provider!r}. Must be one of: {SUPPORTED_PROVIDERS}"
-    )
+SUPPORTED_PROVIDERS = (
+    "openai",
+    "anthropic",
+    "gemini",
+    "mistral",
+    "cohere",
+    "deepseek",
+    "cerebras",
+    "ollama",
+)
 
 
 def call_llm(
     *,
-    client: OpenAI,
+    provider: str,
     model: str,
     system_prompt: str,
     user_message: str,
-    temperature: float = 0.0,
+    temperature: float | None = None,
 ) -> str:
     """
     Plain chat completion (no tools). Returns the assistant message content.
+
+    Args:
+        provider:     any-llm provider name, e.g. "openai", "anthropic", "gemini".
+        model:        Model identifier understood by that provider,
+                      e.g. "gpt-5-mini", "claude-sonnet-4-6", "gemini-2.5-flash".
+        system_prompt: System message text.
+        user_message:  User turn text.
+        temperature:   Sampling temperature. Defaults to None (use the model's
+                       default). Some models (e.g. gpt-5-mini, o-series) reject
+                       any explicit temperature value and require the default.
     """
-    resp = client.chat.completions.create(
+    kwargs: dict = dict(
+        provider=provider.lower(),
         model=model,
-        temperature=temperature,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ],
     )
+    # Only send temperature when explicitly set — models like gpt-5-mini and
+    # the o-series reject temperature=0.0 and require the API default.
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+
+    resp = _completion(**kwargs)
     return resp.choices[0].message.content or ""
