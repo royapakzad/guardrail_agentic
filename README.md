@@ -2,7 +2,7 @@
 
 A research toolkit for studying how AI safety guardrails behave across languages, and whether giving a guardrail access to agentic capabilities — such as live web retrieval, URL verification, and document lookups — changes the quality of its safety judgments.
 
-<img width="2720" height="4480" alt="Pipeline_Diagram_v4" src="https://github.com/user-attachments/assets/8bb8f987-ae33-4417-8f34-4d90e2186001" />
+<img width="2720" height="4480" alt="Pipeline_Diagram_v5" src="https://github.com/user-attachments/assets/d6eb9ddf-ed47-4f39-8f85-2bc59cf6955c" />
 
 
 ---
