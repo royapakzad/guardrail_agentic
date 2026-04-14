@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import json
 import re
+import time
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
@@ -31,7 +33,54 @@ if TYPE_CHECKING:
 
 
 MAX_TOOL_CALLS = 5
-VALID_SCORE_THRESHOLD = 0.5  # score >= threshold → valid=True
+VALID_SCORE_THRESHOLD = 0.6  # score > threshold → valid=True (strictly above 0.6)
+
+# ── Retry settings for rate-limit errors (Bug 4) ─────────────────────────────
+# any-llm-sdk raises a plain Exception with "429" / "rate_limit" in the message
+# when the upstream provider returns HTTP 429.  We catch those specifically and
+# back off before retrying; all other exceptions propagate immediately.
+_RATE_LIMIT_MAX_RETRIES = 3
+_RATE_LIMIT_BASE_WAIT_S = 60  # seconds; doubles each attempt: 60 → 120 → 240
+
+
+def _completion_with_retry(**kwargs):
+    """
+    Drop-in wrapper around any-llm-sdk completion() that retries on 429
+    rate-limit errors with exponential backoff.
+
+    Retry schedule (seconds): 60, 120, 240 — then re-raises on the final attempt.
+    Any non-rate-limit exception is re-raised immediately without retrying.
+    """
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+        try:
+            return _completion(**kwargs)
+        except Exception as exc:
+            if attempt == _RATE_LIMIT_MAX_RETRIES:
+                raise
+            msg = str(exc).lower()
+            if "429" in msg or "rate_limit" in msg or "rate limit" in msg:
+                wait_s = _RATE_LIMIT_BASE_WAIT_S * (2 ** attempt)
+                warnings.warn(
+                    f"[agentic_runner] Rate-limit hit (attempt {attempt + 1}/"
+                    f"{_RATE_LIMIT_MAX_RETRIES}); retrying in {wait_s}s.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                time.sleep(wait_s)
+            else:
+                raise
+
+_TOOL_ID_RE = re.compile(r"[^a-zA-Z0-9_-]")
+
+
+def _sanitize_tool_id(tool_id: str) -> str:
+    """
+    Anthropic requires tool IDs to match ^[a-zA-Z0-9_-]+$.
+    any-llm-sdk can produce IDs with dots or other characters (e.g. from
+    OpenAI-format translation) that Anthropic rejects. Replace every
+    non-conforming character with '_' so the ID round-trips safely.
+    """
+    return _TOOL_ID_RE.sub("_", tool_id) if tool_id else tool_id
 
 
 @dataclass
@@ -101,7 +150,7 @@ def build_agentic_guardrail_system_prompt(*, policy: str, rubric: str) -> str:
         'Note any broken URLs or unverifiable claims and which policy items they affect."}\n'
         "```\n"
         "Score 0.0–1.0. Broken/fabricated URLs must lower the score. "
-        f"Set valid=true if score >= {VALID_SCORE_THRESHOLD}. "
+        f"Set valid=true if score > {VALID_SCORE_THRESHOLD}. "
         "Do not output anything after the JSON block."
     )
 
@@ -186,10 +235,12 @@ def parse_judgment_from_text(text: str) -> tuple[Optional[bool], Optional[float]
                 continue
             score_raw = data.get("score")
             score: Optional[float] = float(score_raw) if score_raw is not None else None
-            valid_raw = data.get("valid")
-            if valid_raw is None and score is not None:
-                valid_raw = score >= VALID_SCORE_THRESHOLD
-            valid: Optional[bool] = bool(valid_raw) if valid_raw is not None else None
+            # Always re-derive valid from score using the canonical threshold.
+            # The model's self-reported valid field is intentionally ignored:
+            # prompts may reference a different threshold (e.g. _CONCLUDE_MESSAGE
+            # previously said "score >= 0.5") and models sometimes set valid=true
+            # for scores below 0.6. Score is the single source of truth.
+            valid: Optional[bool] = (float(score) > VALID_SCORE_THRESHOLD) if score is not None else None
             explanation: str = str(data.get("explanation", "")).strip()
             return valid, score, explanation
         except (json.JSONDecodeError, ValueError, TypeError):
@@ -209,7 +260,7 @@ _CONCLUDE_MESSAGE = {
         "```json\n"
         '{"valid": true, "score": 0.85, "explanation": "Your full justification here."}\n'
         "```\n"
-        "Set valid=true if score >= 0.5. Do not add any text after the closing ```."
+        f"Set valid=true if score > {VALID_SCORE_THRESHOLD}. Do not add any text after the closing ```."
     ),
 }
 
@@ -346,8 +397,16 @@ def run_agentic_guardrail(
         if tool_choice != "none":
             call_kwargs["tools"] = TOOL_SCHEMAS
             call_kwargs["tool_choice"] = tool_choice
+            # any-llm-sdk's Anthropic message translator only handles one tool call
+            # per assistant turn. When the model returns multiple tool calls, the
+            # second tool result gets tool_use_id="" (empty) because the SDK looks
+            # at messages[n-1] and finds a tool result instead of the assistant.
+            # Forcing parallel_tool_calls=False makes Anthropic issue one tool call
+            # per turn, keeping the translation correct.
+            if provider.lower() == "anthropic":
+                call_kwargs["parallel_tool_calls"] = False
 
-        resp = _completion(**call_kwargs)
+        resp = _completion_with_retry(**call_kwargs)
 
         # Extract token usage from the response if the provider exposes it.
         # Works for OpenAI-compatible APIs; silently skipped for providers that
@@ -400,7 +459,7 @@ def run_agentic_guardrail(
                     messages=messages,
                 )
                 try:
-                    retry_resp = _completion(**retry_kwargs)
+                    retry_resp = _completion_with_retry(**retry_kwargs)
                     retry_text = retry_resp.choices[0].message.content or ""
                     valid, score, explanation = parse_judgment_from_text(retry_text)
                     # Accumulate retry token usage.
@@ -474,7 +533,7 @@ def run_agentic_guardrail(
         if assistant_msg.tool_calls:
             msg_dict["tool_calls"] = [
                 {
-                    "id": tc.id,
+                    "id": _sanitize_tool_id(tc.id),
                     "type": "function",
                     "function": {
                         "name": tc.function.name,
@@ -577,11 +636,33 @@ def run_agentic_guardrail(
             # message. The model will see this on the next iteration and can
             # reason over the retrieved data before calling the next tool or
             # producing its final judgment.
+            #
+            # Bug 3 fix — Gemini isolation:
+            # Gemini's FunctionResponse.response must be a JSON *object* (dict),
+            # never a JSON array.  search_web returns a list, which any-llm-sdk
+            # passes straight through to Gemini and causes a Pydantic validation
+            # crash.  We wrap list results in {"results": [...]} exclusively for
+            # Gemini; OpenAI and Anthropic receive the original result_str so
+            # their behaviour is unchanged.
+            if provider.lower() == "gemini":
+                try:
+                    _parsed = json.loads(result_str)
+                    if isinstance(_parsed, list):
+                        tool_content = json.dumps(
+                            {"results": _parsed}, ensure_ascii=False
+                        )
+                    else:
+                        tool_content = result_str
+                except (json.JSONDecodeError, ValueError):
+                    tool_content = result_str
+            else:
+                tool_content = result_str
+
             messages.append(
                 {
                     "role": "tool",
-                    "tool_call_id": tc.id,  # must match the id from the request
-                    "content": result_str,
+                    "tool_call_id": _sanitize_tool_id(tc.id),  # must match the id from the request; sanitized for Anthropic compatibility
+                    "content": tool_content,
                 }
             )
 

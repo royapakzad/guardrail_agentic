@@ -79,6 +79,29 @@ def delta_arrow(delta) -> str:
     return f"≈ {d:.3f}"
 
 
+# Canonical pass/fail threshold — must match VALID_SCORE_THRESHOLD / NONAGENTIC_VALID_THRESHOLD
+# in agentic_runner.py and guardrails_runner.py (both set to 0.6, strictly greater than).
+_VALID_THRESHOLD = 0.6
+
+
+def score_to_valid(score) -> Optional[bool]:
+    """
+    Derive the pass/fail boolean from a numeric score using the canonical threshold.
+    Returns None when score is missing or unparseable.
+
+    This is the single source of truth for the visualization. We re-derive from
+    score rather than trusting the stored 'valid' field because older output files
+    may contain incorrect stored values (pipeline bug where the model's self-reported
+    valid was trusted even when the score was below 0.6).
+    """
+    if score is None:
+        return None
+    try:
+        return float(score) > _VALID_THRESHOLD
+    except (TypeError, ValueError):
+        return None
+
+
 def fmt_valid(v) -> str:
     if v is True:
         return "✅ PASS"
@@ -188,9 +211,9 @@ with tab_overview:
                 "Lang": row.get("language", ""),
                 "Scenario (truncated)": str(row.get("scenario", ""))[:80] + "…",
                 "Policy": label,
-                "Non-agentic valid": fmt_valid(row.get(f"{label}_nonagentic_valid")),
+                "Non-agentic valid": fmt_valid(score_to_valid(na_score)),
                 "Non-agentic score": round(float(na_score), 3) if na_score is not None else None,
-                "Agentic valid": fmt_valid(row.get(f"{label}_agentic_valid")),
+                "Agentic valid": fmt_valid(score_to_valid(ag_score)),
                 "Agentic score": round(float(ag_score), 3) if ag_score is not None else None,
                 "Score delta": delta_arrow(delta),
                 "Judgment changed": "⚡ YES" if changed else ("no" if changed is False else "—"),
@@ -319,7 +342,7 @@ with tab_detail:
             f"{na_score_disp}</div>",
             unsafe_allow_html=True,
         )
-        st.markdown(fmt_valid(row.get(f"{label}_nonagentic_valid")))
+        st.markdown(fmt_valid(score_to_valid(na_score)))
         st.markdown("**Explanation:**")
         st.markdown(
             f"> {row.get(f'{label}_nonagentic_explanation', '—')}"
@@ -340,7 +363,7 @@ with tab_detail:
             f"{ag_score_disp}</div>",
             unsafe_allow_html=True,
         )
-        st.markdown(fmt_valid(row.get(f"{label}_agentic_valid")))
+        st.markdown(fmt_valid(score_to_valid(ag_score)))
 
         # Score delta badge
         delta_str = delta_arrow(delta)
@@ -407,24 +430,31 @@ with tab_detail:
             # Simple bar chart of prompt tokens per turn
             try:
                 import altair as alt
-                chart_data = pd.DataFrame({
-                    "Turn": [str(t["turn"]) for t in ag_per_turn],
-                    "Prompt tokens": [t["prompt_tokens"] for t in ag_per_turn],
-                    "Completion tokens": [t["completion_tokens"] for t in ag_per_turn],
-                })
-                chart = alt.Chart(chart_data).transform_fold(
-                    ["Prompt tokens", "Completion tokens"],
-                    as_=["Type", "Tokens"],
-                ).mark_bar().encode(
-                    x=alt.X("Turn:O", title="Turn"),
-                    y=alt.Y("Tokens:Q", title="Tokens"),
-                    color=alt.Color("Type:N", scale=alt.Scale(
-                        domain=["Prompt tokens", "Completion tokens"],
-                        range=["#4e79a7", "#f28e2b"],
-                    )),
-                    tooltip=["Turn", "Type", "Tokens"],
-                ).properties(height=250, title="Tokens per turn (prompt = context window consumed)")
-                st.altair_chart(chart, use_container_width=True)
+                valid_turns = [
+                    t for t in ag_per_turn
+                    if t.get("prompt_tokens") is not None and t.get("completion_tokens") is not None
+                ]
+                if valid_turns:
+                    chart_data = pd.DataFrame({
+                        "Turn": [str(t["turn"]) for t in valid_turns],
+                        "Prompt tokens": [int(t["prompt_tokens"]) for t in valid_turns],
+                        "Completion tokens": [int(t["completion_tokens"]) for t in valid_turns],
+                    })
+                    chart = alt.Chart(chart_data).transform_fold(
+                        ["Prompt tokens", "Completion tokens"],
+                        as_=["Type", "Tokens"],
+                    ).mark_bar().encode(
+                        x=alt.X("Turn:O", title="Turn"),
+                        y=alt.Y("Tokens:Q", title="Tokens"),
+                        color=alt.Color("Type:N", scale=alt.Scale(
+                            domain=["Prompt tokens", "Completion tokens"],
+                            range=["#4e79a7", "#f28e2b"],
+                        )),
+                        tooltip=["Turn", "Type:N", "Tokens:Q"],
+                    ).properties(height=250, title="Tokens per turn (prompt = context window consumed)")
+                    st.altair_chart(chart, use_container_width=True)
+                else:
+                    st.info("No per-turn token data available for this scenario.")
             except ImportError:
                 st.info("Install `altair` for turn-by-turn charts: `pip install altair`")
 
@@ -643,7 +673,7 @@ with tab_policy_compare:
                 st.markdown("**Non-agentic**")
                 c1, c2 = st.columns(2)
                 c1.metric("Score", f"{float(na_s):.3f}" if na_s is not None else "—")
-                c2.markdown(fmt_valid(na_v))
+                c2.markdown(fmt_valid(score_to_valid(na_s)))
                 with st.expander("Explanation"):
                     st.write(row_cmp.get(f"{lbl}_nonagentic_explanation", "—"))
 
@@ -651,7 +681,7 @@ with tab_policy_compare:
                 c3, c4 = st.columns(2)
                 c3.metric("Score", f"{float(ag_s):.3f}" if ag_s is not None else "—",
                           delta=f"{float(row_cmp.get(f'{lbl}_score_delta', 0) or 0):+.3f}")
-                c4.markdown(fmt_valid(ag_v))
+                c4.markdown(fmt_valid(score_to_valid(ag_s)))
                 with st.expander("Explanation"):
                     st.write(row_cmp.get(f"{lbl}_agentic_explanation", "—"))
 
@@ -816,25 +846,34 @@ with tab_tokens:
     if per_turn:
         try:
             import altair as alt
-            df_growth = pd.DataFrame(per_turn)
-            df_growth["turn_label"] = df_growth["turn"].astype(str)
-            growth_chart = alt.Chart(df_growth).transform_fold(
-                ["prompt_tokens", "completion_tokens"],
-                as_=["Type", "Tokens"],
-            ).mark_bar().encode(
-                x=alt.X("turn_label:O", title="Turn (LLM call #)"),
-                y=alt.Y("Tokens:Q", title="Tokens"),
-                color=alt.Color("Type:N", scale=alt.Scale(
-                    domain=["prompt_tokens", "completion_tokens"],
-                    range=["#4e79a7", "#f28e2b"],
-                )),
-                tooltip=["turn_label", "Type", "Tokens",
-                         alt.Tooltip("has_tool_calls:N", title="Tool calls?")],
-            ).properties(
-                height=280,
-                title="Context window growth (prompt = all prior messages + tool results)",
-            )
-            st.altair_chart(growth_chart, use_container_width=True)
+            valid_per_turn = [
+                t for t in per_turn
+                if t.get("prompt_tokens") is not None and t.get("completion_tokens") is not None
+            ]
+            if valid_per_turn:
+                df_growth = pd.DataFrame(valid_per_turn)
+                df_growth["turn_label"] = df_growth["turn"].astype(str)
+                df_growth["prompt_tokens"] = df_growth["prompt_tokens"].astype(int)
+                df_growth["completion_tokens"] = df_growth["completion_tokens"].astype(int)
+                growth_chart = alt.Chart(df_growth).transform_fold(
+                    ["prompt_tokens", "completion_tokens"],
+                    as_=["Type", "Tokens"],
+                ).mark_bar().encode(
+                    x=alt.X("turn_label:O", title="Turn (LLM call #)"),
+                    y=alt.Y("Tokens:Q", title="Tokens"),
+                    color=alt.Color("Type:N", scale=alt.Scale(
+                        domain=["prompt_tokens", "completion_tokens"],
+                        range=["#4e79a7", "#f28e2b"],
+                    )),
+                    tooltip=["turn_label", "Type:N", "Tokens:Q",
+                             alt.Tooltip("has_tool_calls:N", title="Tool calls?")],
+                ).properties(
+                    height=280,
+                    title="Context window growth (prompt = all prior messages + tool results)",
+                )
+                st.altair_chart(growth_chart, use_container_width=True)
+            else:
+                st.info("No per-turn token data available for this scenario.")
         except ImportError:
             st.dataframe(pd.DataFrame(per_turn), use_container_width=True)
 
