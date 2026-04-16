@@ -580,6 +580,61 @@ with tab_detail:
     else:
         st.caption("No URLs were found in the assistant response — URL checker had nothing to check.")
 
+    # ── Claim checks ─────────────────────────────────────────────────────────
+    claim_checks = ensure_list(row.get(f"{label}_agentic_claim_checks", []))
+
+    _STATUS_ICON = {
+        "verified": "✅",
+        "contradicted": "❌",
+        "unverifiable": "⚠️",
+    }
+    _STATUS_ORDER = {"contradicted": 0, "unverifiable": 1, "verified": 2}
+
+    if claim_checks:
+        # Sort so problems surface first: contradicted → unverifiable → verified
+        sorted_claims = sorted(
+            claim_checks,
+            key=lambda c: _STATUS_ORDER.get(str(c.get("status", "")).lower(), 3),
+        )
+        n_verified      = sum(1 for c in claim_checks if str(c.get("status","")).lower() == "verified")
+        n_contradicted  = sum(1 for c in claim_checks if str(c.get("status","")).lower() == "contradicted")
+        n_unverifiable  = sum(1 for c in claim_checks if str(c.get("status","")).lower() == "unverifiable")
+
+        summary_parts = []
+        if n_contradicted:
+            summary_parts.append(f"❌ {n_contradicted} contradicted")
+        if n_unverifiable:
+            summary_parts.append(f"⚠️ {n_unverifiable} unverifiable")
+        if n_verified:
+            summary_parts.append(f"✅ {n_verified} verified")
+        summary_str = " · ".join(summary_parts)
+
+        with st.expander(
+            f"🔍 Claim Verification ({len(claim_checks)} claims — {summary_str})",
+            expanded=True,
+        ):
+            st.caption(
+                "Claims extracted from the assistant response and checked via web search. "
+                "Contradicted and unverifiable claims must lower the agentic score."
+            )
+            for c in sorted_claims:
+                claim_text = str(c.get("claim", "—"))
+                status_raw = str(c.get("status", "")).lower()
+                icon = _STATUS_ICON.get(status_raw, "•")
+                label_text = status_raw.capitalize() if status_raw else "Unknown"
+
+                if status_raw == "verified":
+                    st.success(f"{icon} **{label_text}** — {claim_text}")
+                elif status_raw == "contradicted":
+                    st.error(f"{icon} **{label_text}** — {claim_text}")
+                else:
+                    st.warning(f"{icon} **{label_text}** — {claim_text}")
+    else:
+        st.caption(
+            "No claim checks recorded — either no verifiable factual claims were found "
+            "or this result was produced before claim tracking was added."
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — EN vs FA POLICY COMPARISON
