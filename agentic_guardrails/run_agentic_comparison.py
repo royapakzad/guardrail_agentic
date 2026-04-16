@@ -471,6 +471,7 @@ def process_row(
             out[f"{base}_agentic_sources_used"] = aj.sources_used
             out[f"{base}_agentic_tool_call_log"] = aj.tool_call_log
             out[f"{base}_agentic_url_checks"] = aj.url_checks
+            out[f"{base}_agentic_claim_checks"] = aj.claim_checks
             out[f"{base}_agentic_prompt_tokens_total"] = aj.prompt_tokens_total
             out[f"{base}_agentic_completion_tokens_total"] = aj.completion_tokens_total
             out[f"{base}_agentic_total_tokens"] = aj.total_tokens_used
