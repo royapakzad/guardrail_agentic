@@ -648,9 +648,27 @@ def main() -> None:
     if log_dir:
         print(f"Scenario logs → {log_dir}/")
 
+    # ---- Base columns (needed for incremental flushing) --------------------
+    # Computed once before the loop so the checkpoint writer can use it on
+    # every iteration without waiting for all rows to complete.
+    base_keys: set = set(rows_in[0].keys()) if rows_in else set()
+    base_keys |= {
+        "provider", "model", "assistant_system_prompt", "assistant_response",
+        "guardrail_backend", "max_tool_calls_allowed", "error",
+    }
+
+    def _flush(rows: list, *, label: str = "") -> None:
+        """Write current rows to all output files (per-judge + mega)."""
+        for judge in judges:
+            judge_rows = _extract_judge_rows(rows, judge, base_keys)
+            write_outputs(judge_rows, f"{args.output_prefix}_{judge.label}")
+        write_outputs(rows, f"{args.output_prefix}_all")
+
     # ---- Main pipeline loop ------------------------------------------------
     # Each row is independent. Errors are caught per-row so a single API
     # failure does not abort the entire run.
+    # After every row, outputs are flushed to disk so partial results are
+    # available even if the run crashes or is interrupted mid-way.
     rows_out = []
     total = len(rows_in)
 
@@ -680,14 +698,12 @@ def main() -> None:
             print(f"  ERROR: {e}")
         rows_out.append(out_row)
 
-    # ---- Write outputs -----------------------------------------------------
-    # Base columns are non-judge-specific and included in every per-judge file.
-    base_keys: set = set(rows_in[0].keys()) if rows_in else set()
-    base_keys |= {
-        "provider", "model", "assistant_system_prompt", "assistant_response",
-        "guardrail_backend", "max_tool_calls_allowed", "error",
-    }
+        # Flush after every row — cheap compared to LLM API calls, and ensures
+        # a crash or keyboard-interrupt never loses more than one row's work.
+        _flush(rows_out)
+        print(f"  ✓ checkpoint saved ({idx}/{total} rows)")
 
+    # ---- Final write (identical to last checkpoint, confirms completion) ----
     # Per-judge files: clean column names (no judge label), compatible with
     # visualize_results.py. Written to <output_prefix>_<judge_label>.[csv|json]
     print("\nPer-judge outputs:")
