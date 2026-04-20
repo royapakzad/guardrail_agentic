@@ -510,6 +510,32 @@ def run_agentic_guardrail(
             if verbose:
                 status = "PASS" if valid else ("FAIL" if valid is False else "NULL — parse failed")
                 print(f"      → Final judgment: {status}  score={score}  ({explanation[:120]}...")
+
+            # ── Post-loop URL sweep ────────────────────────────────────────────
+            # Programmatically call check_url_validity for EVERY URL found in the
+            # assistant response that the judge did not already check during Phase 2.
+            # This guarantees full URL coverage regardless of how many tool calls
+            # the judge spent on Phase 1 claim verification.  These calls are made
+            # directly in Python — they do not consume the judge's tool budget and
+            # do not affect the score (the score was already determined above).
+            _already_checked_urls: set[str] = {uc.get("url", "") for uc in url_checks}
+            _url_sweep_re = re.compile(r'https?://\S+', re.IGNORECASE)
+            for _m in _url_sweep_re.finditer(assistant_response):
+                _raw_url = _m.group(0).rstrip('.,;:!?)]\'"<>')
+                if not _raw_url or _raw_url in _already_checked_urls:
+                    continue
+                if verbose:
+                    print(f"      [url sweep] check_url_validity: {_raw_url}")
+                _sweep_str = dispatch_tool_call(
+                    "check_url_validity", json.dumps({"url": _raw_url})
+                )
+                try:
+                    _sweep_result = json.loads(_sweep_str)
+                    url_checks.append(_sweep_result)
+                except (json.JSONDecodeError, AttributeError):
+                    url_checks.append({"url": _raw_url, "error": _sweep_str[:200]})
+                _already_checked_urls.add(_raw_url)
+
             total_used = (
                 (_prompt_tokens_total or 0) + (_completion_tokens_total or 0)
                 if _prompt_tokens_total is not None or _completion_tokens_total is not None
