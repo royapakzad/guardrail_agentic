@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import streamlit as st
 
@@ -122,6 +122,76 @@ def ensure_list(val) -> list:
         except (json.JSONDecodeError, ValueError):
             pass
     return []
+
+
+def extract_urls_from_text(text: str) -> list[str]:
+    """
+    Extract URLs from raw text using regex.
+    Strips trailing punctuation that is part of surrounding prose, not the URL.
+    """
+    urls: list[str] = []
+    for m in re.finditer(r'https?://\S+', text or "", re.IGNORECASE):
+        url = m.group(0).rstrip('.,;:!?)]\'"<>')
+        if url:
+            urls.append(url)
+    return urls
+
+
+def extract_judge_research_urls(tool_log: list) -> list[str]:
+    """
+    URLs the judge consulted for its own research (Phase 1 — claim verification).
+    Sources: fetch_url inputs + search_web result links.
+    Does NOT include check_url_validity (those come from the assistant response).
+    """
+    urls: list[str] = []
+    for call in tool_log:
+        tool = call.get("tool", "")
+        inp = call.get("input", {})
+        preview = call.get("output_preview", "")
+        if tool == "fetch_url":
+            url = inp.get("url", "") if isinstance(inp, dict) else ""
+            if url:
+                urls.append(url)
+        elif tool == "search_web":
+            try:
+                results = json.loads(preview) if isinstance(preview, str) else preview
+                if isinstance(results, dict) and "results" in results:
+                    results = results["results"]
+                if isinstance(results, list):
+                    for r in results:
+                        url = r.get("url", "") if isinstance(r, dict) else ""
+                        if url:
+                            urls.append(url)
+            except (json.JSONDecodeError, TypeError):
+                pass
+    return urls
+
+
+def extract_url_validity_checks(tool_log: list) -> list[str]:
+    """
+    URLs that the judge checked via check_url_validity (Phase 2).
+    These are URLs extracted FROM the assistant's response by the judge.
+    """
+    urls: list[str] = []
+    for call in tool_log:
+        if call.get("tool") == "check_url_validity":
+            inp = call.get("input", {})
+            url = inp.get("url", "") if isinstance(inp, dict) else ""
+            if url:
+                urls.append(url)
+    return urls
+
+
+def url_to_domain(url: str) -> str:
+    """Extract the parent domain (without www.) from a URL."""
+    from urllib.parse import urlparse
+    try:
+        netloc = urlparse(url).netloc.lower()
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        return netloc or url
+    except Exception:
+        return url
 
 
 # ── sidebar: file loader ──────────────────────────────────────────────────────
@@ -274,6 +344,356 @@ with tab_overview:
             f"{sum(deltas)/len(deltas):+.3f}" if deltas else "—",
         )
         col.metric("Judgments changed", f"{changed_count} / {len(valid_rows)}")
+
+    st.markdown("---")
+
+    # ── URL domain analysis ──────────────────────────────────────────────────
+    st.subheader("🌐 URL Domain Analysis")
+
+    import pandas as pd
+    from collections import Counter
+
+    _is_en = lambda l: l.lower().startswith("en")
+
+    # ── Build validity records: one entry per (url, row, policy) ────────────
+    # Ground truth: every URL found by regex in the assistant response.
+    # After the post-loop URL sweep in agentic_runner.py, every URL in the
+    # response has a corresponding check_url_validity result stored in
+    # {policy}_agentic_url_checks.  We join them here so we can show
+    # validity (valid / invalid / unchecked) rather than just coverage.
+    _coverage_records: list[dict] = []
+    for _row in valid_rows:
+        _lang = _row.get("language", "unknown")
+        _resp_urls = list(dict.fromkeys(  # deduplicate while preserving order
+            extract_urls_from_text(_row.get("assistant_response", ""))
+        ))
+        for _lbl in policy_labels:
+            # Build a lookup: url → check result dict, from stored url_checks
+            _uc_list = ensure_list(_row.get(f"{_lbl}_agentic_url_checks", []))
+            _uc_map: dict[str, dict] = {}
+            for _uc in _uc_list:
+                _u = _uc.get("url", "")
+                if _u:
+                    _uc_map[_u] = _uc
+            for _url in _resp_urls:
+                _chk = _uc_map.get(_url)
+                _coverage_records.append({
+                    "url": _url,
+                    "domain": url_to_domain(_url),
+                    "policy": _lbl,
+                    "language": _lang,
+                    # was_checked: True means check_url_validity ran (post-loop sweep
+                    # ensures this for all new runs; old files may still have gaps)
+                    "was_checked": _chk is not None,
+                    # is_valid: True/False from the HTTP check; None if not checked
+                    "is_valid": _chk.get("valid") if _chk else None,
+                    "status_code": _chk.get("status_code") if _chk else None,
+                })
+
+    # ── Build judge-research records: fetch_url + search_web (Phase 1) ──────
+    _research_records: list[dict] = []
+    for _row in valid_rows:
+        _lang = _row.get("language", "unknown")
+        for _lbl in policy_labels:
+            _tlog = ensure_list(_row.get(f"{_lbl}_agentic_tool_call_log", []))
+            for _url in extract_judge_research_urls(_tlog):
+                _research_records.append({
+                    "url": _url,
+                    "domain": url_to_domain(_url),
+                    "policy": _lbl,
+                    "language": _lang,
+                })
+
+    # ── Shared renderer (domain chart + policy + language breakdown + CSV) ───
+    def _render_domain_breakdown(
+        records: list[dict],
+        bar_color: str,
+        csv_suffix: str,
+        policy_cols: list[str],
+        count_field: str = "url",   # field to count per record
+    ) -> None:
+        if not records:
+            st.info("No URLs found in this category for the loaded file.")
+            return
+
+        _all_langs_local   = sorted({r["language"] for r in records})
+        _en_langs_local    = [l for l in _all_langs_local if _is_en(l)]
+        _other_langs_local = [l for l in _all_langs_local if not _is_en(l)]
+
+        _dc = Counter(r["domain"] for r in records)
+        _t20 = _dc.most_common(20)
+        _df_t = pd.DataFrame(_t20, columns=["Domain", "Count"])
+        st.markdown(
+            f"**Top 20 domains** — {sum(_dc.values()):,} total · "
+            f"{len(_dc):,} unique domains"
+        )
+        try:
+            import altair as alt
+            st.altair_chart(
+                alt.Chart(_df_t).mark_bar(color=bar_color).encode(
+                    x=alt.X("Count:Q"),
+                    y=alt.Y("Domain:N", sort="-x", title=None),
+                    tooltip=["Domain", "Count"],
+                ).properties(height=min(38 * len(_t20), 520)),
+                use_container_width=True,
+            )
+        except ImportError:
+            st.dataframe(_df_t, use_container_width=True)
+
+        if policy_cols:
+            st.markdown("**By policy file**")
+            _pc_cols = st.columns(len(policy_cols))
+            for _pc, _plbl in zip(_pc_cols, policy_cols):
+                _sub = Counter(r["domain"] for r in records if r["policy"] == _plbl)
+                _sub_df = pd.DataFrame(_sub.most_common(20), columns=["Domain", "Count"])
+                _pc.markdown(f"`{_plbl}` — {sum(_sub.values()):,}")
+                _pc.dataframe(_sub_df, use_container_width=True, height=280)
+
+        st.markdown("**By scenario language — English vs non-English**")
+        _lc1, _lc2 = st.columns(2)
+        with _lc1:
+            _enc = Counter(r["domain"] for r in records if _is_en(r["language"]))
+            _en_lbl = " / ".join(_en_langs_local) if _en_langs_local else "en"
+            st.markdown(f"**English** (`{_en_lbl}`) — {sum(_enc.values()):,}")
+            if _enc:
+                st.dataframe(
+                    pd.DataFrame(_enc.most_common(20), columns=["Domain", "Count"]),
+                    use_container_width=True, height=280,
+                )
+            else:
+                st.caption("No English rows.")
+        with _lc2:
+            _occ = Counter(r["domain"] for r in records if not _is_en(r["language"]))
+            _oth_lbl = " / ".join(_other_langs_local) if _other_langs_local else "non-en"
+            st.markdown(f"**Non-English** (`{_oth_lbl}`) — {sum(_occ.values()):,}")
+            if _occ:
+                st.dataframe(
+                    pd.DataFrame(_occ.most_common(20), columns=["Domain", "Count"]),
+                    use_container_width=True, height=280,
+                )
+            else:
+                st.caption("No non-English rows.")
+
+        with st.expander("Full URL list + CSV download", expanded=False):
+            _url_agg: dict[str, dict] = {}
+            for _rec in records:
+                _u = _rec["url"]
+                if _u not in _url_agg:
+                    _url_agg[_u] = {
+                        "url": _u, "domain": _rec["domain"], "total": 0,
+                        **{f"policy_{p}": 0 for p in policy_cols},
+                        **{f"lang_{l}": 0 for l in _all_langs_local},
+                    }
+                _url_agg[_u]["total"] += 1
+                if _rec["policy"] in policy_cols:
+                    _url_agg[_u][f"policy_{_rec['policy']}"] += 1
+                _url_agg[_u][f"lang_{_rec['language']}"] += 1
+            _df_full = pd.DataFrame(sorted(_url_agg.values(), key=lambda x: -x["total"]))
+            st.dataframe(_df_full, use_container_width=True, height=280)
+            st.download_button(
+                label="⬇️  Download as CSV",
+                data=_df_full.to_csv(index=False).encode("utf-8"),
+                file_name=f"{selected_file.replace('.json', '')}_{csv_suffix}.csv",
+                mime="text/csv",
+            )
+
+    # ── Two tabs ─────────────────────────────────────────────────────────────
+    _n_asst  = len({r["url"] for r in _coverage_records})
+    _n_res   = len({r["url"] for r in _research_records})
+    _utab1, _utab2 = st.tabs([
+        f"📄 Assistant Response URL Validity ({_n_asst} unique)",
+        f"🔍 Judge Research — fetch + search ({_n_res} unique)",
+    ])
+
+    with _utab1:
+        st.caption(
+            "Every URL found in the assistant response by regex is checked via "
+            "`check_url_validity` (a programmatic post-loop sweep guarantees full "
+            "coverage for new runs). **Valid** = HTTP < 400 or 401/403. "
+            "**Invalid** = HTTP ≥ 404, connection failure, or fabricated URL. "
+            "Old output files produced before the sweep was added may show "
+            "some URLs as *unchecked*."
+        )
+
+        if not _coverage_records:
+            st.info("No URLs found in assistant responses in this file.")
+        else:
+            _all_langs_cov = sorted({r["language"] for r in _coverage_records})
+            _en_langs_cov  = [l for l in _all_langs_cov if _is_en(l)]
+            _oth_langs_cov = [l for l in _all_langs_cov if not _is_en(l)]
+
+            # ── Validity summary metrics ─────────────────────────────────────
+            _total      = len(_coverage_records)
+            _n_valid    = sum(1 for r in _coverage_records if r["is_valid"] is True)
+            _n_invalid  = sum(1 for r in _coverage_records if r["is_valid"] is False)
+            _n_unchkd   = sum(1 for r in _coverage_records if r["is_valid"] is None)
+            _valid_pct  = 100 * _n_valid  / _total if _total else 0
+            _cm1, _cm2, _cm3, _cm4 = st.columns(4)
+            _cm1.metric("URLs in responses", f"{_total:,}",
+                        help="Total URL appearances found by regex in all assistant responses")
+            _cm2.metric("Valid", f"{_n_valid:,}",
+                        help="URL returned HTTP < 400 (or 401/403 — resource exists, access-restricted)")
+            _cm3.metric("Invalid / unreachable", f"{_n_invalid:,}",
+                        help="HTTP ≥ 404, connection error, or timeout — likely broken or fabricated")
+            _cm4.metric("Validity rate", f"{_valid_pct:.1f}%",
+                        help="Valid / (Valid + Invalid). Unchecked URLs are excluded from denominator."
+                             if _n_unchkd else "Valid / Total")
+            if _n_unchkd:
+                st.warning(
+                    f"⚠️ {_n_unchkd} URL appearance(s) have no check result — "
+                    "likely from an output file produced before the automatic URL sweep was added. "
+                    "Re-run the evaluation to get full validity data."
+                )
+
+            # Per-policy validity
+            st.markdown("**Validity rate by policy**")
+            _cov_pol_cols = st.columns(len(policy_labels))
+            for _cpc, _plbl in zip(_cov_pol_cols, policy_labels):
+                _pol_recs   = [r for r in _coverage_records if r["policy"] == _plbl]
+                _pol_valid  = sum(1 for r in _pol_recs if r["is_valid"] is True)
+                _pol_chkd   = sum(1 for r in _pol_recs if r["is_valid"] is not None)
+                _pol_pct    = 100 * _pol_valid / _pol_chkd if _pol_chkd else 0
+                _cpc.metric(
+                    f"`{_plbl}`", f"{_pol_pct:.1f}%",
+                    help=f"{_pol_valid} valid / {_pol_chkd} checked ({len(_pol_recs)} found in responses)",
+                )
+
+            st.markdown("---")
+
+            # ── Domain chart: valid vs invalid ───────────────────────────────
+            st.markdown("**Top 20 domains — valid vs invalid URLs**")
+            _dc_all = Counter(r["domain"] for r in _coverage_records)
+            _dc_val = Counter(r["domain"] for r in _coverage_records if r["is_valid"] is True)
+            _dc_inv = Counter(r["domain"] for r in _coverage_records if r["is_valid"] is False)
+            _dc_unc = Counter(r["domain"] for r in _coverage_records if r["is_valid"] is None)
+            _cov_df = pd.DataFrame([
+                {
+                    "Domain": d,
+                    "Valid": _dc_val.get(d, 0),
+                    "Invalid": _dc_inv.get(d, 0),
+                    "Unchecked": _dc_unc.get(d, 0),
+                }
+                for d, _ in _dc_all.most_common(20)
+            ])
+            try:
+                import altair as alt
+                _fold_cols = ["Valid", "Invalid"]
+                if _dc_unc:
+                    _fold_cols.append("Unchecked")
+                _stacked = alt.Chart(_cov_df).transform_fold(
+                    _fold_cols,
+                    as_=["Status", "Count"],
+                ).mark_bar().encode(
+                    x=alt.X("Count:Q"),
+                    y=alt.Y("Domain:N", sort="-x", title=None),
+                    color=alt.Color("Status:N", scale=alt.Scale(
+                        domain=["Valid", "Invalid", "Unchecked"],
+                        range=["#59a14f", "#e15759", "#aaaaaa"],
+                    )),
+                    tooltip=["Domain", "Status:N", "Count:Q"],
+                ).properties(height=min(38 * len(_cov_df), 520))
+                st.altair_chart(_stacked, use_container_width=True)
+            except ImportError:
+                st.dataframe(_cov_df, use_container_width=True)
+
+            # By policy
+            st.markdown("**By policy file**")
+            _cov_p_cols = st.columns(len(policy_labels))
+            for _cpc, _plbl in zip(_cov_p_cols, policy_labels):
+                _pr = [r for r in _coverage_records if r["policy"] == _plbl]
+                _pd_all = Counter(r["domain"] for r in _pr)
+                _pd_val = Counter(r["domain"] for r in _pr if r["is_valid"] is True)
+                _pd_inv = Counter(r["domain"] for r in _pr if r["is_valid"] is False)
+                _pd_df = pd.DataFrame([
+                    {
+                        "Domain": d, "Found": _pd_all[d],
+                        "Valid": _pd_val.get(d, 0),
+                        "Invalid": _pd_inv.get(d, 0),
+                    }
+                    for d, _ in _pd_all.most_common(20)
+                ])
+                _cpc.markdown(f"`{_plbl}`")
+                _cpc.dataframe(_pd_df, use_container_width=True, height=280)
+
+            # By language
+            st.markdown("**By scenario language — English vs non-English**")
+            _lc1, _lc2 = st.columns(2)
+            for _col, _filter, _label, _langs in [
+                (_lc1, lambda r: _is_en(r["language"]),
+                 "English", " / ".join(_en_langs_cov) if _en_langs_cov else "en"),
+                (_lc2, lambda r: not _is_en(r["language"]),
+                 "Non-English", " / ".join(_oth_langs_cov) if _oth_langs_cov else "non-en"),
+            ]:
+                with _col:
+                    _lr = [r for r in _coverage_records if _filter(r)]
+                    _la_all = Counter(r["domain"] for r in _lr)
+                    _la_val = Counter(r["domain"] for r in _lr if r["is_valid"] is True)
+                    _la_inv = Counter(r["domain"] for r in _lr if r["is_valid"] is False)
+                    _l_valid_total = sum(1 for r in _lr if r["is_valid"] is True)
+                    _l_chkd_total  = sum(1 for r in _lr if r["is_valid"] is not None)
+                    _l_pct = 100 * _l_valid_total / _l_chkd_total if _l_chkd_total else 0
+                    st.markdown(
+                        f"**{_label}** (`{_langs}`) — "
+                        f"{len(_lr):,} URLs · {_l_valid_total}/{_l_chkd_total} valid ({_l_pct:.1f}%)"
+                    )
+                    if _la_all:
+                        _l_df = pd.DataFrame([
+                            {"Domain": d, "Found": _la_all[d],
+                             "Valid": _la_val.get(d, 0),
+                             "Invalid": _la_inv.get(d, 0)}
+                            for d, _ in _la_all.most_common(20)
+                        ])
+                        st.dataframe(_l_df, use_container_width=True, height=280)
+                    else:
+                        st.caption(f"No {_label.lower()} rows.")
+
+            # Full CSV
+            with st.expander("Full URL validity table + CSV download", expanded=False):
+                _cov_agg: dict[tuple, dict] = {}
+                for _rec in _coverage_records:
+                    _key = (_rec["url"], _rec["policy"])
+                    if _key not in _cov_agg:
+                        _cov_agg[_key] = {
+                            "url": _rec["url"], "domain": _rec["domain"],
+                            "policy": _rec["policy"],
+                            "appearances": 0, "valid": 0, "invalid": 0, "unchecked": 0,
+                            "status_code": _rec.get("status_code"),
+                            **{f"lang_{l}": 0 for l in _all_langs_cov},
+                        }
+                    _cov_agg[_key]["appearances"] += 1
+                    if _rec["is_valid"] is True:
+                        _cov_agg[_key]["valid"] += 1
+                    elif _rec["is_valid"] is False:
+                        _cov_agg[_key]["invalid"] += 1
+                    else:
+                        _cov_agg[_key]["unchecked"] += 1
+                    if _rec.get("status_code") is not None:
+                        _cov_agg[_key]["status_code"] = _rec["status_code"]
+                    _cov_agg[_key][f"lang_{_rec['language']}"] += 1
+                _df_cov_full = pd.DataFrame(
+                    sorted(_cov_agg.values(), key=lambda x: -x["appearances"])
+                )
+                _checked_col = _df_cov_full["valid"] + _df_cov_full["invalid"]
+                _df_cov_full["validity_%"] = (
+                    _df_cov_full["valid"] / _checked_col.replace(0, float("nan")) * 100
+                ).round(1)
+                st.dataframe(_df_cov_full, use_container_width=True, height=280)
+                st.download_button(
+                    label="⬇️  Download as CSV",
+                    data=_df_cov_full.to_csv(index=False).encode("utf-8"),
+                    file_name=f"{selected_file.replace('.json', '')}_response_url_validity.csv",
+                    mime="text/csv",
+                )
+
+    with _utab2:
+        st.caption(
+            "URLs the **judge consulted for its own research** (Phase 1 — claim verification): "
+            "`fetch_url` inputs and links returned in `search_web` results."
+        )
+        _render_domain_breakdown(
+            _research_records, bar_color="#4e79a7",
+            csv_suffix="judge_research_urls", policy_cols=policy_labels,
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
