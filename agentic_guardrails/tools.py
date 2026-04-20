@@ -12,12 +12,20 @@ TOOL_SCHEMAS is the list of JSON schemas passed to OpenAI's tools= parameter.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import json
 from typing import Any
 
 
 MAX_FETCH_CHARS = 4000
 MAX_SEARCH_RESULTS = 5
+
+# Hard wall-clock timeout for any single tool call (search, fetch, or URL check).
+# If a tool takes longer than this, it is cancelled and a ToolError is raised
+# so the agentic loop can continue rather than hanging indefinitely.
+# DuckDuckGo in particular can silently stall when rate-limited; without this
+# cap the entire run would freeze until killed manually.
+_TOOL_TIMEOUT_S = 60
 
 
 class ToolError(RuntimeError):
@@ -47,7 +55,7 @@ def search_web(query: str, max_results: int = MAX_SEARCH_RESULTS) -> list[dict[s
         raise ToolError("Neither 'ddgs' nor 'duckduckgo_search' is installed. Run: pip install ddgs")
 
     try:
-        with DDGS() as client:
+        with DDGS(timeout=20) as client:
             raw = list(client.text(query, max_results=max_results))
         results = [
             {
@@ -182,16 +190,21 @@ def dispatch_tool_call(name: str, arguments_json: str) -> str:
     Route a tool call (name + JSON-encoded arguments string) to the correct
     Python function and return the result as a JSON string.
 
+    Every call is run in a background thread with a hard wall-clock timeout of
+    _TOOL_TIMEOUT_S seconds. If the tool hangs (e.g. DuckDuckGo silently stalls
+    under rate-limiting, or a server drips bytes slowly), the thread is abandoned
+    and a timeout error is returned to the model so the agentic loop can continue.
+
     Called by the agentic loop when the model requests a tool.
-    On ToolError, returns a JSON string describing the failure so the loop
-    can insert it into the conversation without crashing.
+    On ToolError or timeout, returns a JSON error string so the loop can insert
+    it into the conversation without crashing.
     """
     try:
         args: dict[str, Any] = json.loads(arguments_json) if arguments_json else {}
     except json.JSONDecodeError:
         return json.dumps({"error": f"Could not parse arguments JSON: {arguments_json!r}"})
 
-    try:
+    def _run() -> str:
         if name == "search_web":
             query = args.get("query", "")
             results = search_web(query)
@@ -209,8 +222,19 @@ def dispatch_tool_call(name: str, arguments_json: str) -> str:
 
         return json.dumps({"error": f"Unknown tool: {name!r}"})
 
-    except ToolError as exc:
-        return json.dumps({"error": str(exc)})
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_run)
+        try:
+            return future.result(timeout=_TOOL_TIMEOUT_S)
+        except concurrent.futures.TimeoutError:
+            return json.dumps({
+                "error": (
+                    f"Tool '{name}' timed out after {_TOOL_TIMEOUT_S}s "
+                    f"(likely a network stall — result unavailable)."
+                )
+            })
+        except ToolError as exc:
+            return json.dumps({"error": str(exc)})
 
 
 # ---------------------------------------------------------------------------
