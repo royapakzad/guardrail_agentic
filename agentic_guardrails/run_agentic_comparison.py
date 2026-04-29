@@ -40,6 +40,7 @@ import csv
 import os
 import re
 import sys
+import time
 import warnings
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
@@ -378,6 +379,7 @@ def process_row(
             if verbose:
                 print(f"        non-agentic eval ...", end=" ", flush=True)
             na_prompt_tokens = _count_tokens(nonagentic_eval_text, model=judge.model)
+            _na_start = time.perf_counter()
             try:
                 gr = run_guardrail_for_policy(
                     guardrail=guardrail,
@@ -388,6 +390,7 @@ def process_row(
                     assistant_response=assistant_response,
                     model_id=judge.model_id,
                 )
+                _na_elapsed = round(time.perf_counter() - _na_start, 3)
                 na_completion_tokens = _count_tokens(str(gr.explanation or ""), model=judge.model)
                 na_total_tokens = na_prompt_tokens + na_completion_tokens
                 out[f"{base}_nonagentic_valid"] = gr.valid
@@ -396,6 +399,7 @@ def process_row(
                 out[f"{base}_nonagentic_prompt_tokens"] = na_prompt_tokens
                 out[f"{base}_nonagentic_completion_tokens"] = na_completion_tokens
                 out[f"{base}_nonagentic_total_tokens"] = na_total_tokens
+                out[f"{base}_nonagentic_judgment_time_s"] = _na_elapsed
                 if logger is not None:
                     logger.log_nonagentic_eval(
                         policy_label=f"{policy_label}[{judge.model_id}]",
@@ -410,14 +414,16 @@ def process_row(
                         total_tokens=na_total_tokens,
                     )
                 if verbose:
-                    print(f"score={gr.score}  valid={gr.valid}  tokens={na_total_tokens:,}")
+                    print(f"score={gr.score}  valid={gr.valid}  tokens={na_total_tokens:,}  time={_na_elapsed:.2f}s")
             except Exception as e:
+                _na_elapsed = round(time.perf_counter() - _na_start, 3)
                 out[f"{base}_nonagentic_valid"] = None
                 out[f"{base}_nonagentic_score"] = None
                 out[f"{base}_nonagentic_explanation"] = f"ERROR: {e}"
                 out[f"{base}_nonagentic_prompt_tokens"] = na_prompt_tokens
                 out[f"{base}_nonagentic_completion_tokens"] = None
                 out[f"{base}_nonagentic_total_tokens"] = na_prompt_tokens
+                out[f"{base}_nonagentic_judgment_time_s"] = _na_elapsed
                 if logger is not None:
                     logger.log_nonagentic_eval(
                         policy_label=f"{policy_label}[{judge.model_id}]",
@@ -477,6 +483,7 @@ def process_row(
             out[f"{base}_agentic_total_tokens"] = aj.total_tokens_used
             out[f"{base}_agentic_peak_prompt_tokens"] = aj.peak_prompt_tokens
             out[f"{base}_agentic_token_usage_per_turn"] = aj.token_usage_per_turn
+            out[f"{base}_agentic_judgment_time_s"] = aj.judgment_time_s
 
             # 2c. Comparison
             cmp = compare_judgments(
