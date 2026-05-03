@@ -456,13 +456,14 @@ st.sidebar.markdown('<p class="caption-text">Evaluate and compare LLM guardrail 
 
 
 # ── TABS ───────────────────────────────────────────────────────────────────────
-tab_overview, tab_detail, tab_urls, tab_compare_policy, tab_compare_models, tab_tokens = st.tabs([
+tab_overview, tab_detail, tab_urls, tab_compare_policy, tab_compare_models, tab_tokens, tab_timing = st.tabs([
     "📊 Overview",
     "🔍 Scenario Detail",
     "🔗 URL Analysis",
     "🌐 EN vs FA Policy",
     "⚖️ Compare Models",
     "📈 Token Usage",
+    "⏱️ Judgment Timing",
 ])
 
 
@@ -574,6 +575,8 @@ with tab_overview:
             changed   = row.get(f"{label}_judgment_changed")
             tool_calls = row.get(f"{label}_agentic_tool_calls_made", 0)
 
+            na_time = safe_float(row.get(f"{label}_nonagentic_judgment_time_s"))
+            ag_time = safe_float(row.get(f"{label}_agentic_judgment_time_s"))
             rows_for_table.append({
                 "ID": row.get("id", ""),
                 "Lang": row.get("language", ""),
@@ -586,6 +589,8 @@ with tab_overview:
                 "Delta": delta_arrow(delta),
                 "Changed": "⚡ YES" if changed else ("no" if changed is False else "—"),
                 "Tools": f"{tool_calls}" if tool_calls else "0",
+                "Non-ag time (s)": round(na_time, 2) if na_time is not None else None,
+                "Ag time (s)": round(ag_time, 2) if ag_time is not None else None,
             })
 
     df_table = pd.DataFrame(rows_for_table)
@@ -749,6 +754,27 @@ with tab_detail:
                 ).properties(height=220)
                 st.altair_chart(chart_turns, use_container_width=True)
             st.dataframe(pd.DataFrame(ag_per_turn), use_container_width=True)
+
+    # ── Judgment timing ───────────────────────────────────────────────────────
+    na_time = safe_float(row.get(f"{label}_nonagentic_judgment_time_s"))
+    ag_time = safe_float(row.get(f"{label}_agentic_judgment_time_s"))
+    if na_time is not None or ag_time is not None:
+        st.markdown("## Judgment Timing")
+        st.markdown(
+            '<p class="caption-text">Wall-clock seconds from when the policy + text entered the '
+            'judge model until it produced a score and pass/fail verdict. '
+            'Agentic time includes all tool calls (search, fetch, URL checks).</p>',
+            unsafe_allow_html=True,
+        )
+        tc1, tc2, tc3 = st.columns(3)
+        tc1.metric("Non-agentic time", f"{na_time:.2f}s" if na_time is not None else "—",
+                   help="Single LLM call — pure inference latency")
+        tc2.metric("Agentic time", f"{ag_time:.2f}s" if ag_time is not None else "—",
+                   help="All LLM turns + all tool calls + post-loop URL sweep")
+        if na_time and ag_time and na_time > 0:
+            mult = ag_time / na_time
+            tc3.metric("Agentic / Non-ag", f"{mult:.1f}×",
+                       help="How many times slower the agentic path was")
 
     st.markdown("<hr class='custom-hr'>", unsafe_allow_html=True)
 
@@ -1758,3 +1784,244 @@ with tab_tokens:
             'either no tool calls were made or the provider did not return usage metadata.</div>',
             unsafe_allow_html=True,
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 7 — JUDGMENT TIMING
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_timing:
+    st.markdown("<h1>Judgment Timing</h1>", unsafe_allow_html=True)
+    st.markdown(
+        '<p class="caption-text">'
+        'Wall-clock seconds from when the full text (policy + rubric + scenario + response) '
+        'entered the judge model until it produced a score and pass/fail verdict. '
+        '<strong>Non-agentic</strong>: single LLM call (pure inference latency). '
+        '<strong>Agentic</strong>: all LLM turns + all tool calls (search, fetch, URL checks) + post-loop URL sweep. '
+        'Requires output files produced after timing was added to the pipeline.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+    st.markdown("<hr class='custom-hr'>", unsafe_allow_html=True)
+
+    # Collect timing data across all policies
+    _timing_has_data = False
+    for _tlabel in policy_labels:
+        _na_times = [safe_float(r.get(f"{_tlabel}_nonagentic_judgment_time_s")) for r in valid_rows]
+        _ag_times = [safe_float(r.get(f"{_tlabel}_agentic_judgment_time_s")) for r in valid_rows]
+        _na_times_v = [t for t in _na_times if t is not None]
+        _ag_times_v = [t for t in _ag_times if t is not None]
+
+        if not _na_times_v and not _ag_times_v:
+            continue
+        _timing_has_data = True
+
+        st.markdown(
+            f'<div class="section-label">Policy: <code>{_tlabel}</code></div>',
+            unsafe_allow_html=True,
+        )
+
+        # ── Summary KPI row ───────────────────────────────────────────────────
+        _avg_na_t = avg(_na_times_v)
+        _avg_ag_t = avg(_ag_times_v)
+        _max_ag_t = max(_ag_times_v) if _ag_times_v else None
+        _min_ag_t = min(_ag_times_v) if _ag_times_v else None
+        _mult     = _avg_ag_t / _avg_na_t if _avg_ag_t and _avg_na_t and _avg_na_t > 0 else None
+
+        tm1, tm2, tm3, tm4, tm5 = st.columns(5)
+        tm1.metric(
+            "Avg non-ag time",
+            f"{_avg_na_t:.2f}s" if _avg_na_t is not None else "—",
+            help="Average wall-clock time for a single non-agentic LLM judge call",
+        )
+        tm2.metric(
+            "Avg agentic time",
+            f"{_avg_ag_t:.2f}s" if _avg_ag_t is not None else "—",
+            help="Average total time for the full agentic loop (all LLM turns + all tool calls)",
+        )
+        tm3.metric(
+            "Max agentic time",
+            f"{_max_ag_t:.2f}s" if _max_ag_t is not None else "—",
+            help="Slowest agentic evaluation — often scenarios with many tool calls",
+        )
+        tm4.metric(
+            "Min agentic time",
+            f"{_min_ag_t:.2f}s" if _min_ag_t is not None else "—",
+        )
+        tm5.metric(
+            "Agentic / Non-ag",
+            f"{_mult:.1f}×" if _mult is not None else "—",
+            help="How many times slower the agentic path is on average",
+        )
+
+        # ── Bar chart: non-ag vs agentic time per scenario ────────────────────
+        _time_chart_rows = []
+        for _r in valid_rows:
+            _sid = f"[{_r.get('id','')}] {_r.get('language','')}"
+            _nat = safe_float(_r.get(f"{_tlabel}_nonagentic_judgment_time_s"))
+            _agt = safe_float(_r.get(f"{_tlabel}_agentic_judgment_time_s"))
+            if _nat is not None:
+                _time_chart_rows.append({"Scenario": _sid, "Mode": "Non-agentic", "Time (s)": _nat})
+            if _agt is not None:
+                _time_chart_rows.append({"Scenario": _sid, "Mode": "Agentic", "Time (s)": _agt})
+
+        if _time_chart_rows:
+            _df_tc = pd.DataFrame(_time_chart_rows)
+            _time_bar = alt.Chart(_df_tc).mark_bar().encode(
+                x=alt.X("Scenario:O", sort=None, title="Scenario"),
+                y=alt.Y("Time (s):Q", title="Seconds"),
+                color=alt.Color("Mode:N", scale=alt.Scale(
+                    domain=["Non-agentic", "Agentic"],
+                    range=["#94A3B8", model_color(guardrail_raw)],
+                )),
+                xOffset="Mode:N",
+                tooltip=["Scenario:O", "Mode:N", "Time (s):Q"],
+            ).properties(height=280).configure_view(strokeOpacity=0).configure_axis(
+                labelFont="Inter", titleFont="Inter", labelFontSize=11, titleFontSize=11,
+            )
+            st.markdown("**Time per scenario — non-agentic vs agentic**")
+            st.altair_chart(_time_bar, use_container_width=True)
+
+        # ── Scatter: agentic time vs tool calls made ──────────────────────────
+        _scatter_rows = []
+        for _r in valid_rows:
+            _agt = safe_float(_r.get(f"{_tlabel}_agentic_judgment_time_s"))
+            _tc  = safe_float(_r.get(f"{_tlabel}_agentic_tool_calls_made"))
+            _sid = str(_r.get("id", ""))
+            _lang = _r.get("language", "")
+            if _agt is not None and _tc is not None:
+                _scatter_rows.append({
+                    "Agentic time (s)": _agt,
+                    "Tool calls": _tc,
+                    "ID": _sid,
+                    "Lang": _lang,
+                })
+        if _scatter_rows:
+            _df_sc = pd.DataFrame(_scatter_rows)
+            _scatter_chart = alt.Chart(_df_sc).mark_circle(size=80, opacity=0.75).encode(
+                x=alt.X("Tool calls:Q", scale=alt.Scale(domain=[-0.5, max(_df_sc["Tool calls"]) + 0.5])),
+                y=alt.Y("Agentic time (s):Q"),
+                color=alt.value(model_color(guardrail_raw)),
+                tooltip=["ID:N", "Lang:N", "Tool calls:Q", "Agentic time (s):Q"],
+            ).properties(height=240).configure_view(strokeOpacity=0).configure_axis(
+                labelFont="Inter", titleFont="Inter", labelFontSize=11, titleFontSize=11,
+            )
+            st.markdown("**Agentic time vs tool calls made**")
+            st.altair_chart(_scatter_chart, use_container_width=True)
+
+        st.markdown("<hr class='custom-hr'>", unsafe_allow_html=True)
+
+    if not _timing_has_data:
+        st.info(
+            "No timing data found in this output file. "
+            "Re-run the evaluation pipeline to generate timing columns "
+            "(`_nonagentic_judgment_time_s` and `_agentic_judgment_time_s`)."
+        )
+    else:
+        # ── Per-scenario timing table ─────────────────────────────────────────
+        st.markdown("## Per-Scenario Timing Table")
+        _time_table_rows = []
+        for _r in valid_rows:
+            for _tlabel in policy_labels:
+                _nat = safe_float(_r.get(f"{_tlabel}_nonagentic_judgment_time_s"))
+                _agt = safe_float(_r.get(f"{_tlabel}_agentic_judgment_time_s"))
+                _tc  = safe_float(_r.get(f"{_tlabel}_agentic_tool_calls_made"))
+                _mult_row = (
+                    round(_agt / _nat, 1) if _agt is not None and _nat is not None and _nat > 0
+                    else None
+                )
+                _time_table_rows.append({
+                    "ID": _r.get("id", ""),
+                    "Lang": _r.get("language", ""),
+                    "Policy": _tlabel,
+                    "Tool calls": int(_tc) if _tc is not None else None,
+                    "Non-ag time (s)": round(_nat, 3) if _nat is not None else None,
+                    "Agentic time (s)": round(_agt, 3) if _agt is not None else None,
+                    "Agentic / Non-ag ×": _mult_row,
+                })
+
+        _df_time_tbl = pd.DataFrame(_time_table_rows)
+        st.dataframe(_df_time_tbl, use_container_width=True, height=350)
+
+        st.download_button(
+            "⬇️  Download timing CSV",
+            _df_time_tbl.to_csv(index=False).encode("utf-8"),
+            file_name=f"{selected_file.replace('.json', '')}_judgment_timing.csv",
+            mime="text/csv",
+        )
+
+        # ── Cross-model timing comparison (if multiple files available) ───────
+        st.markdown("<hr class='custom-hr'>", unsafe_allow_html=True)
+        st.markdown("## Cross-Model Timing Comparison")
+        st.markdown(
+            '<p class="caption-text">Load multiple output files (one per judge model) '
+            'to compare judgment latency across Claude, Gemini, and GPT.</p>',
+            unsafe_allow_html=True,
+        )
+
+        @st.cache_data(show_spinner=False)
+        def _load_timing_group(paths_str: str) -> dict[str, list[dict]]:
+            result = {}
+            for _p in paths_str.split("|"):
+                try:
+                    with open(_p) as _fh:
+                        _d = json.load(_fh)
+                    _vrows = [_r for _r in _d if any(_k.endswith("_nonagentic_score") for _k in _r)]
+                    if _vrows and any(
+                        _r.get(f"{_lbl}_nonagentic_judgment_time_s") is not None
+                        for _r in _vrows
+                        for _lbl in detect_policy_labels(_vrows[0])
+                    ):
+                        result[Path(_p).name] = _vrows
+                except Exception:
+                    pass
+            return result
+
+        _all_timing_data = _load_timing_group("|".join(str(_f) for _f in json_files))
+
+        if len(_all_timing_data) >= 2:
+            _cross_policy = st.radio(
+                "Policy", policy_labels, horizontal=True, key="timing_cross_pol"
+            )
+            _cross_rows = []
+            for _fname, _frows in _all_timing_data.items():
+                _gm = _frows[0].get("guardrail_model", _fname)
+                _gm_label = pretty_guardrail(_gm) if _gm else pretty_file_label(_fname)
+                _fn_times = [
+                    safe_float(_r.get(f"{_cross_policy}_nonagentic_judgment_time_s"))
+                    for _r in _frows
+                ]
+                _ag_times_f = [
+                    safe_float(_r.get(f"{_cross_policy}_agentic_judgment_time_s"))
+                    for _r in _frows
+                ]
+                _fn_times_v = [t for t in _fn_times if t is not None]
+                _ag_times_fv = [t for t in _ag_times_f if t is not None]
+                for _t in _fn_times_v:
+                    _cross_rows.append({"Model": _gm_label, "Mode": "Non-agentic", "Time (s)": _t})
+                for _t in _ag_times_fv:
+                    _cross_rows.append({"Model": _gm_label, "Mode": "Agentic", "Time (s)": _t})
+
+            if _cross_rows:
+                _df_cross_t = pd.DataFrame(_cross_rows)
+                _cross_mode = st.radio(
+                    "Mode", ["Non-agentic", "Agentic", "Both"], horizontal=True, key="timing_cross_mode"
+                )
+                if _cross_mode != "Both":
+                    _df_cross_t = _df_cross_t[_df_cross_t["Mode"] == _cross_mode]
+
+                _box_cross = alt.Chart(_df_cross_t).mark_boxplot(extent="min-max", size=40).encode(
+                    x=alt.X("Model:N", title="Judge model"),
+                    y=alt.Y("Time (s):Q"),
+                    color=alt.Color("Mode:N", scale=alt.Scale(
+                        domain=["Non-agentic", "Agentic"],
+                        range=["#94A3B8", "#3B82F6"],
+                    )),
+                ).properties(height=300)
+                st.altair_chart(_box_cross, use_container_width=True)
+            else:
+                st.info("No timing data found across the loaded files.")
+        else:
+            st.info(
+                "Only one output file with timing data found. "
+                "Run evaluations with multiple judge models to enable cross-model timing comparison."
+            )
