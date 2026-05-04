@@ -197,8 +197,10 @@ _MODEL_COLORS = {
 
 # ── HELPERS ────────────────────────────────────────────────────────────────────
 
-def load_json(path: str) -> list[dict]:
-    with open(path, "r", encoding="utf-8") as f:
+def load_json(source) -> list[dict]:
+    if hasattr(source, "read"):
+        return json.load(source)
+    with open(source, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -400,28 +402,32 @@ def pass_rate(rows, label, mode="nonagentic"):
 st.sidebar.markdown("# 🛡️ Guardrail Explorer")
 st.sidebar.markdown("<hr/>", unsafe_allow_html=True)
 
-outputs_dir = Path("outputs")
-json_files = sorted(outputs_dir.glob("*.json")) if outputs_dir.exists() else []
+uploaded_files = st.sidebar.file_uploader(
+    "Upload JSON output file(s)",
+    type="json",
+    accept_multiple_files=True,
+    help="Upload one or more evaluation output JSON files to explore",
+)
 
-if not json_files:
-    st.error("No JSON files found in `outputs/`. Run a guardrail evaluation first.")
+if not uploaded_files:
+    st.info("Upload one or more evaluation JSON files using the sidebar to get started.")
     st.stop()
 
-# Build display labels for each file
-file_labels = {pretty_file_label(f.name) or f.name: f for f in json_files}
+# Build display labels for each uploaded file
+file_labels = {pretty_file_label(f.name) or f.name: f for f in uploaded_files}
 label_list = list(file_labels.keys())
 
 selected_label = st.sidebar.selectbox(
-    "Output file",
+    "Active file",
     label_list,
-    index=len(label_list) - 1,
-    help="Select an evaluation output file to explore",
+    index=0,
+    help="Select which uploaded file to explore",
 )
-selected_file_path = file_labels[selected_label]
-selected_file = selected_file_path.name
+selected_file_obj = file_labels[selected_label]
+selected_file = selected_file_obj.name
 
 try:
-    data = load_json(str(selected_file_path))
+    data = load_json(selected_file_obj)
 except Exception as e:
     st.error(f"Failed to load `{selected_file}`: {e}")
     st.stop()
