@@ -349,10 +349,6 @@ The same policy translated into Farsi/Persian. Running both files in the same ev
 
 A domain-agnostic policy based on the standard harm taxonomy used across major LLM guardrail frameworks (violence, hate speech, sexual content, self-harm, CBRNE/drugs, illegal activity, privacy, misinformation, harassment). Use these as a starting point when you have no domain-specific policy, or to benchmark your domain policy against a generic baseline. `policy_generic_fa.txt` is the full Farsi translation.
 
-### `config/rubric.txt`
-
-An optional scoring rubric passed to the guardrail as supplementary guidance. The primary scoring mechanism is the deduction-based system described in [Section 7](#7-scoring-methodology) — the rubric can add domain-specific context but does not override the deduction table.
-
 ---
 
 ## 7. Scoring Methodology
