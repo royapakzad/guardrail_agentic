@@ -44,7 +44,7 @@ The toolkit is built for context-specific, high-stakes domains where response qu
 - **Healthcare** — medical advice, medication information, patient rights
 - **Finance** — investment guidance, debt counseling, insurance, consumer protection
 - **Crisis support** — mental health, domestic violence, emergency services
-- **Legal services** — rights information, legal procedures, access to representation
+- **Legal services** — rights information, legal procedures
 
 The project also tests guardrail consistency across **non-English languages**. Policies and scenarios can be provided in any language, allowing direct comparison of whether the same evaluation criteria produce consistent scores regardless of the language they are written in.
 
