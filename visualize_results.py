@@ -545,8 +545,10 @@ with tab_compare:
         MAX_ROWS = 80
         visible_ids = df_h["id"].unique()[:MAX_ROWS]
         df_h = df_h[df_h["id"].isin(visible_ids)].copy()
-        df_h["row_label"] = df_h.apply(
-            lambda r: f"[{r['id']}] {r['language']} · {r['scenario'][:38]}…", axis=1
+        df_h["row_label"] = (
+            "[" + df_h["id"].astype(str) + "] "
+            + df_h["language"] + " · "
+            + df_h["scenario"].str[:38] + "…"
         )
         df_h["score_val"] = df_h[score_col]
 
@@ -679,22 +681,25 @@ with tab_inspect:
     st.markdown("---")
     st.markdown("### Single scenario deep-dive")
 
-    dc1, dc2, dc3 = st.columns([3, 2, 2])
+    dc1, dc2, dc3, dc4 = st.columns([3, 1, 2, 2])
     with dc1:
-        all_ids = sorted(df["id"].unique())
+        all_ids = sorted(df["id"].unique(), key=lambda x: (int(x) if str(x).isdigit() else x))
         sel_sid = st.selectbox(
             "Scenario ID", all_ids,
             format_func=lambda s: f"[{s}] {df[df['id']==s]['scenario'].iloc[0][:52]}…" if not df[df['id']==s].empty else s,
             key="ds",
         )
     with dc2:
-        sel_file = st.selectbox("File", list(raw.keys()), format_func=lambda f: file_labels[f], key="df")
+        avail_langs_d = sorted(df[df["id"] == sel_sid]["language"].unique())
+        sel_lang_d = st.selectbox("Language", avail_langs_d, key="dl")
     with dc3:
+        sel_file = st.selectbox("File", list(raw.keys()), format_func=lambda f: file_labels[f], key="df")
+    with dc4:
         sel_pol_d = st.selectbox("Policy", all_policies, key="dp") if all_policies else None
 
-    det_rows = [r for r in raw[sel_file] if str(r.get("id","")) == str(sel_sid)]
+    det_rows = [r for r in raw[sel_file] if str(r.get("id","")) == str(sel_sid) and r.get("language","") == sel_lang_d]
     if not det_rows:
-        st.warning(f"Scenario {sel_sid} not found in {file_labels[sel_file]}.")
+        st.warning(f"Scenario {sel_sid} (language: {sel_lang_d}) not found in {file_labels[sel_file]}.")
     elif not sel_pol_d:
         st.warning("No policy selected.")
     else:
