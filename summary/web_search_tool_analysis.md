@@ -1,7 +1,7 @@
 # Web Search Tool Analysis: SearXNG vs Tavily vs DuckDuckGo
 
 Comparison of three web search backends used for agentic guardrail claim verification,
-based on actual evaluation runs against 10 scenarios in the humanitarian/financial domain.
+based on actual evaluation runs against 10 scenarios in the humanitarian domain.
 
 **Datasets analyzed:**
 
