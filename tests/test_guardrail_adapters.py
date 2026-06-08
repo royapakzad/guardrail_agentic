@@ -48,8 +48,8 @@ def test_create_guardrail_glider_requires_criteria():
     ["openai:gpt-5-nano", "anthropic:claude-sonnet-4-6", "gemini:gemini-2.5-flash"],
 )
 def test_anyllm_adapter_routes_every_provider_to_generative_judge(monkeypatch, model_id):
-    # PR-5: the library's AnyLlm.validate() coerces score to int, so all providers
-    # now go through the repo's prompt-based generative judge (float scores).
+    # The library's AnyLlm.validate() coerces score to int, so all providers go
+    # through the repo's prompt-based generative judge (float scores).
     sentinel = gr.NonAgenticJudgment(valid=True, score=0.72, explanation="judged")
     captured = {}
 
@@ -57,12 +57,10 @@ def test_anyllm_adapter_routes_every_provider_to_generative_judge(monkeypatch, m
         captured["model_id"] = model_id
         return sentinel
 
-    monkeypatch.setattr(gr, "_run_nonagentic_fallback", fake_judge)
-    fake = _FakeGuardrail(score=0.9)  # the library object must NOT be consulted
-    judgment = AnyLlmAdapter(fake).evaluate(eval_text="t", policy_text="p", assistant_response="r", model_id=model_id)
+    monkeypatch.setattr(gr, "_run_generative_judge", fake_judge)
+    judgment = AnyLlmAdapter().evaluate(eval_text="t", policy_text="p", assistant_response="r", model_id=model_id)
     assert judgment is sentinel
     assert captured["model_id"] == model_id
-    assert not fake.calls  # library validate() is never called
 
 
 def test_anyllm_adapter_defaults_model_when_unspecified(monkeypatch):
@@ -72,8 +70,8 @@ def test_anyllm_adapter_defaults_model_when_unspecified(monkeypatch):
         captured["model_id"] = model_id
         return gr.NonAgenticJudgment(valid=None, score=None, explanation="")
 
-    monkeypatch.setattr(gr, "_run_nonagentic_fallback", fake_judge)
-    AnyLlmAdapter(_FakeGuardrail(score=0.5)).evaluate(eval_text="t", policy_text="p", assistant_response="r")
+    monkeypatch.setattr(gr, "_run_generative_judge", fake_judge)
+    AnyLlmAdapter().evaluate(eval_text="t", policy_text="p", assistant_response="r")
     assert captured["model_id"] == gr._DEFAULT_GENERATIVE_JUDGE_MODEL
 
 
