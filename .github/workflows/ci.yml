@@ -27,3 +27,6 @@ jobs:
 
       - name: mypy
         run: uv run mypy agentic_guardrails
+
+      - name: pytest
+        run: uv run pytest

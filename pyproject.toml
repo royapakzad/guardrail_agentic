@@ -39,6 +39,7 @@ dev = [
     "ruff==0.15.12",
     "mypy>=1.10",
     "pre-commit>=3.7",
+    "pytest>=8.0",
     "types-requests",
     "types-beautifulsoup4",
 ]
@@ -80,3 +81,8 @@ exclude = [
     "agentic_guardrails/demo_guardrail_log.py",
     "visualize_results.py",
 ]
+
+# ── pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
