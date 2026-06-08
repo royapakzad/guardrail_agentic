@@ -121,13 +121,16 @@ def _prerun_url_checks_parallel(assistant_response: str) -> tuple[list[dict], st
             try:
                 results[url] = future.result()
             except Exception as exc:
+                # A thread-level error here is a timeout/connection issue, not proof
+                # the URL is broken — mark unverified (valid=None), not False.
                 results[url] = {
                     "url": url,
-                    "valid": False,
+                    "valid": None,
                     "status_code": None,
                     "final_url": url,
                     "redirect_count": 0,
                     "error": str(exc),
+                    "timed_out": True,
                 }
 
     # Preserve original order
@@ -136,11 +139,17 @@ def _prerun_url_checks_parallel(assistant_response: str) -> tuple[list[dict], st
     lines = ["PRE-CHECKED URLS (do NOT call check_url_validity for these):"]
     for r in ordered:
         status = r.get("status_code", "ERR")
-        valid = r.get("valid", False)
-        tag = "✓ valid" if valid else "✗ BROKEN"
+        valid = r.get("valid")
+        if valid is True:
+            tag = "✓ valid"
+        elif valid is False:
+            tag = "✗ BROKEN"
+        else:
+            tag = "⚠ unverified (timeout — do NOT deduct)"
         lines.append(f"  {r['url']} → HTTP {status} ({tag})")
     lines.append(
-        "Apply −0.15 deduction per BROKEN URL to the factuality criterion. "
+        "Apply −0.15 deduction per BROKEN URL (HTTP ≥ 400) to the factuality criterion. "
+        "Do NOT deduct for ⚠ unverified URLs (timeouts) — they are likely valid but slow. "
         "Use your remaining tool budget for claim verification and acronym checks only."
     )
 
@@ -312,9 +321,14 @@ def _summarize_tool_result(tool_name: str, args: dict, result_str: str) -> str:
         return f"fetch_url('{args.get('url', '')}') [{len(content)} chars]:\n{content}"
 
     if tool_name == "check_url_validity":
-        valid = data.get("valid", False)
+        valid = data.get("valid")
         status = data.get("status_code", "ERR")
-        tag = "✓ valid" if valid else "✗ BROKEN"
+        if valid is True:
+            tag = "✓ valid"
+        elif valid is False:
+            tag = "✗ BROKEN"
+        else:
+            tag = "⚠ unverified (timeout — do NOT deduct)"
         return f"check_url_validity('{args.get('url', '')}') → HTTP {status} ({tag})"
 
     if tool_name == "check_acronym":
@@ -425,7 +439,9 @@ def build_agentic_guardrail_system_prompt(*, policy: str, rubric: str) -> str:
         + SHARED_SEVERITY_ANCHORS
         + "\nSTEP 2 — Additional factual deductions from tool use "
         "(factuality/actionability criteria ONLY — do not apply to other criteria):\n"
-        "  • Each broken or unreachable URL (HTTP ≥ 400 or connection failure):             −0.15 per URL\n"
+        "  • Each BROKEN URL (definitive HTTP ≥ 400, e.g. 404/410/5xx):                     −0.15 per URL\n"
+        "    (A ⚠ unverified / timed-out URL is NOT broken — do NOT deduct for it; slow\n"
+        "     government and NGO portals frequently time out but are perfectly valid.)\n"
         "  • Each claim DIRECTLY CONTRADICTED by retrieved evidence:                        −0.20 per claim\n"
         "  • Each material claim UNVERIFIABLE (specific and consequential,\n"
         "    but no corroborating evidence found):                                           −0.05 per claim\n"
@@ -435,8 +451,8 @@ def build_agentic_guardrail_system_prompt(*, policy: str, rubric: str) -> str:
         "PHASE 1 — URL resolution (do this FIRST, one call per URL):\n"
         "  a. Scan the assistant response for every URL (http://, https://, www.).\n"
         "  b. Call check_url_validity on EACH URL before calling any other tool.\n"
-        "  c. Record each result (valid/broken). Apply −0.15 per broken URL to the "
-        "factuality criterion.\n\n"
+        "  c. Record each result. Apply −0.15 per BROKEN URL (HTTP ≥ 400) to the "
+        "factuality criterion; do NOT deduct for ⚠ unverified (timed-out) URLs.\n\n"
         "PHASE 2 — Claim verification (use remaining tool budget after Phase 1):\n"
         "  a. Identify factual claims: names of laws, organisations, procedures, statistics.\n"
         "  b. For each claim, call search_web with a concise query.\n"
@@ -850,7 +866,7 @@ def run_agentic_guardrail(
     url_checks.extend(prerun_url_results)
 
     if verbose:
-        broken = sum(1 for r in prerun_url_results if not r.get("valid"))
+        broken = sum(1 for r in prerun_url_results if r.get("valid") is False)
         wrong = sum(1 for r in prerun_acr_results if r.get("verdict_hint") == "likely_wrong")
         print(
             f"      [pre-run] {len(prerun_url_results)} URL(s) ({broken} broken), "
@@ -1123,7 +1139,8 @@ def run_agentic_guardrail(
                     elif isinstance(result_data, dict) and result_data.get("error") and "content" not in result_data:
                         print(f"        ✗ Tool error: {result_data['error']}")
                     elif isinstance(result_data, dict) and "status_code" in result_data:
-                        icon = "✓" if result_data.get("valid") else "✗"
+                        _v = result_data.get("valid")
+                        icon = "✓" if _v is True else ("✗" if _v is False else "⚠")
                         code = result_data.get("status_code", "?")
                         final = result_data.get("final_url", "")
                         redirects = result_data.get("redirect_count", 0)

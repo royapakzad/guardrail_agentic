@@ -302,10 +302,19 @@ def check_url_validity(url: str) -> dict:
     """
     Check whether a URL is reachable. Same implementation for all backends.
 
-    Strategy: HEAD first; if 405, retry with streaming GET.
-    401/403 are treated as valid — the URL exists but is access-restricted.
+    Strategy: HEAD first (generous timeout); if the server rejects HEAD (403/405/501)
+    or HEAD fails, retry with a streaming GET and an even longer timeout. 401/403 are
+    treated as valid — the URL exists but is access-restricted.
 
-    Returns {url, valid, status_code, final_url, redirect_count, error}.
+    Three outcomes (so slow-but-real sites are not falsely flagged as broken):
+      valid=True   — reachable (HTTP < 400, or 401/403).
+      valid=False  — definitively broken (HTTP >= 400, e.g. 404/410/5xx).
+      valid=None   — could NOT be confirmed (timeout / connection error). The URL
+                     may well be valid; ``timed_out=True`` is set and the judge is
+                     told NOT to apply a broken-link deduction on this basis. Many
+                     government / NGO portals respond slowly to automated requests.
+
+    Returns {url, valid, status_code, final_url, redirect_count, error, timed_out}.
     """
     try:
         import requests
@@ -313,19 +322,41 @@ def check_url_validity(url: str) -> dict:
         raise ToolError(f"Missing dependency: {exc}. Run: pip install requests") from exc
 
     headers = {"User-Agent": "Mozilla/5.0 (research bot; URL validity check)"}
-    try:
-        resp = requests.head(url, timeout=10, headers=headers, allow_redirects=True)
-        if resp.status_code == 405:
-            resp = requests.get(url, timeout=10, headers=headers, allow_redirects=True, stream=True)
-            resp.close()
-    except Exception as exc:
+    resp = None
+    last_exc: Exception | None = None
+    # Try HEAD (fast) then GET (slow sites / HEAD-hostile servers). Generous timeouts
+    # so legitimate-but-slow institutional sites are not timed out prematurely.
+    for method, timeout in (("head", 15), ("get", 25)):
+        try:
+            if method == "head":
+                resp = requests.head(url, timeout=timeout, headers=headers, allow_redirects=True)
+                # Some servers reject/disable HEAD; fall through to GET.
+                if resp.status_code in (403, 405, 501):
+                    continue
+            else:
+                resp = requests.get(url, timeout=timeout, headers=headers, allow_redirects=True, stream=True)
+                resp.close()
+            break
+        except Exception as exc:  # timeout / connection error — try the next method
+            last_exc = exc
+            resp = None
+
+    if resp is None:
+        # Network-level failure: we cannot prove the URL is broken. Do NOT mark it
+        # invalid (valid=None) so the judge does not apply a broken-link deduction.
         return {
             "url": url,
-            "valid": False,
+            "valid": None,
             "status_code": None,
             "final_url": url,
             "redirect_count": 0,
-            "error": str(exc),
+            "error": str(last_exc) if last_exc else "unreachable",
+            "timed_out": True,
+            "note": (
+                "Could not reach the URL within the timeout (slow server or network "
+                "issue). The URL may still be valid — do NOT apply a broken-link "
+                "deduction on this basis."
+            ),
         }
 
     status = resp.status_code
@@ -337,6 +368,7 @@ def check_url_validity(url: str) -> dict:
         "final_url": resp.url,
         "redirect_count": len(resp.history),
         "error": None,
+        "timed_out": False,
     }
 
 
