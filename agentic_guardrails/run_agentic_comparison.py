@@ -275,6 +275,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--tool-group",
+        default="default",
+        help=(
+            "Which set of agentic tools the judge may call (default: 'default' = "
+            "search_web, fetch_url, check_url_validity, check_acronym). Domain tool "
+            "groups (humanitarian / financial / content_moderation) are added in later PRs."
+        ),
+    )
+    p.add_argument(
         "--max-tool-calls",
         type=int,
         default=5,
@@ -301,6 +310,7 @@ def process_row(
     rubric: str,
     max_tool_calls: int,
     web_search_tool: str = "duckduckgo",
+    tool_group: str = "default",
     verbose: bool = False,
     log_dir: str | None = None,
 ) -> dict[str, Any]:
@@ -483,6 +493,7 @@ def process_row(
                     logger=logger,
                     nonagentic_hints=na_hints,
                     scenario_language=language or "en",
+                    tool_group=tool_group,
                     policy_label=f"{policy_label}[{judge.model_id}]",
                 )
             except Exception as e:
@@ -587,6 +598,11 @@ def main() -> None:
     import tools as _tools_mod
 
     _tools_mod.set_search_backend(args.web_search_tool)
+
+    # Validate the tool group up front so a typo fails fast (before any LLM calls).
+    if args.tool_group not in _tools_mod.TOOL_GROUPS:
+        valid = ", ".join(sorted(_tools_mod.TOOL_GROUPS))
+        parser.error(f"--tool-group must be one of: {valid}. Got: {args.tool_group!r}")
     print(f"Web search backend: {args.web_search_tool.upper()}")
 
     # ---- Load shared text configs -------------------------------------------
@@ -727,6 +743,7 @@ def main() -> None:
                 rubric=rubric,
                 max_tool_calls=args.max_tool_calls,
                 web_search_tool=args.web_search_tool,
+                tool_group=args.tool_group,
                 verbose=args.verbose,
                 log_dir=log_dir,
             )

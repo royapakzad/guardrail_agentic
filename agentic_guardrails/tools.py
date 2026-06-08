@@ -30,6 +30,8 @@ import concurrent.futures
 import importlib
 import json
 import os
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 MAX_FETCH_CHARS = 4000
@@ -422,25 +424,12 @@ def dispatch_tool_call(name: str, arguments_json: str) -> str:
     except json.JSONDecodeError:
         return json.dumps({"error": f"Could not parse arguments JSON: {arguments_json!r}"})
 
-    def _run() -> str:
-        if name == "search_web":
-            results = search_web(args.get("query", ""))
-            return json.dumps(results, ensure_ascii=False)
-        if name == "fetch_url":
-            url = args.get("url", "")
-            content = fetch_url(url)
-            return json.dumps({"url": url, "content": content}, ensure_ascii=False)
-        if name == "check_url_validity":
-            result = check_url_validity(args.get("url", ""))
-            return json.dumps(result, ensure_ascii=False)
-        if name == "check_acronym":
-            result = check_acronym(
-                acronym=args.get("acronym", ""),
-                claimed_expansion=args.get("claimed_expansion", ""),
-                context_language=args.get("context_language", "en"),
-            )
-            return json.dumps(result, ensure_ascii=False)
+    tool = REGISTRY.get(name)
+    if tool is None:
         return json.dumps({"error": f"Unknown tool: {name!r}"})
+
+    def _run() -> str:
+        return json.dumps(tool.handler(args), ensure_ascii=False)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_run)
@@ -574,3 +563,72 @@ TOOL_SCHEMAS: list[dict] = [
         },
     },
 ]
+
+
+# ── Tool registry ─────────────────────────────────────────────────────────────
+# A name-keyed registry plus tool groups, so new domain tools can be added by
+# registering one Tool and listing it in a group — without editing the dispatcher
+# or the agentic runner. The "default" group reproduces the original 4-tool set.
+
+
+@dataclass(frozen=True)
+class Tool:
+    """A callable tool: its OpenAI-format schema and a handler over parsed args."""
+
+    name: str
+    schema: dict
+    handler: Callable[[dict], Any]  # parsed-args dict -> JSON-serializable result
+
+
+class ToolRegistry:
+    """Name → Tool registry. Schemas are produced per tool group (see TOOL_GROUPS)."""
+
+    def __init__(self) -> None:
+        self._tools: dict[str, Tool] = {}
+
+    def register(self, tool: Tool) -> None:
+        self._tools[tool.name] = tool
+
+    def get(self, name: str) -> Tool | None:
+        return self._tools.get(name)
+
+    def names(self) -> list[str]:
+        return list(self._tools)
+
+    def schemas_for(self, names: list[str]) -> list[dict]:
+        return [self._tools[n].schema for n in names if n in self._tools]
+
+
+# Handlers map a parsed-args dict to a JSON-serializable result; dispatch_tool_call
+# serializes the return value and applies the timeout / ToolError wrapping.
+_HANDLERS: dict[str, Callable[[dict], Any]] = {
+    "search_web": lambda a: search_web(a.get("query", "")),
+    "fetch_url": lambda a: {"url": a.get("url", ""), "content": fetch_url(a.get("url", ""))},
+    "check_url_validity": lambda a: check_url_validity(a.get("url", "")),
+    "check_acronym": lambda a: check_acronym(
+        acronym=a.get("acronym", ""),
+        claimed_expansion=a.get("claimed_expansion", ""),
+        context_language=a.get("context_language", "en"),
+    ),
+}
+
+REGISTRY = ToolRegistry()
+for _schema in TOOL_SCHEMAS:
+    _name = _schema["function"]["name"]
+    REGISTRY.register(Tool(name=_name, schema=_schema, handler=_HANDLERS[_name]))
+
+# Tool groups select which tools the agentic judge may call. Domain tool groups
+# (humanitarian / financial / content_moderation) are added in later PRs and always
+# include the generalist search_web so the agent keeps some freedom.
+TOOL_GROUPS: dict[str, list[str]] = {
+    "default": ["search_web", "fetch_url", "check_url_validity", "check_acronym"],
+}
+
+
+def get_tool_schemas(group: str = "default") -> list[dict]:
+    """Return the OpenAI-format schemas for the named tool group."""
+    names = TOOL_GROUPS.get(group)
+    if names is None:
+        valid = ", ".join(sorted(TOOL_GROUPS))
+        raise ValueError(f"Unknown tool group {group!r}. Valid groups: {valid}")
+    return REGISTRY.schemas_for(names)

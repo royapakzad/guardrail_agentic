@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING
 from any_llm import completion as _completion
 from guardrails_runner import SHARED_SEVERITY_ANCHORS
 from llm_gateway import resolve_completion_kwargs
-from tools import TOOL_SCHEMAS, check_acronym, check_url_validity, dispatch_tool_call
+from tools import check_acronym, check_url_validity, dispatch_tool_call, get_tool_schemas
 
 if TYPE_CHECKING:
     from scenario_logger import ScenarioLogger
@@ -800,6 +800,7 @@ def run_agentic_guardrail(
     policy_label: str = "",
     nonagentic_hints: str = "",
     scenario_language: str = "en",
+    tool_group: str = "default",
 ) -> AgenticJudgment:
     """
     Run the agentic guardrail evaluation loop.
@@ -815,6 +816,10 @@ def run_agentic_guardrail(
     nonagentic_hints: formatted string of non-agentic categorical verdicts from
         _build_nonagentic_hints(), used to focus the agentic tool budget.
     """
+    # Schemas the judge may call this run, selected by tool group (default = the
+    # original 4 web tools). Domain tool groups are added in later PRs.
+    tool_schemas = get_tool_schemas(tool_group)
+
     tool_calls_made = 0
     sources_used: list[str] = []
     tool_call_log: list[dict] = []
@@ -893,7 +898,7 @@ def run_agentic_guardrail(
             "messages": messages,
         }
         if tool_choice != "none":
-            call_kwargs["tools"] = TOOL_SCHEMAS
+            call_kwargs["tools"] = tool_schemas
             call_kwargs["tool_choice"] = tool_choice
             # Force one tool call per turn for both OpenAI and Anthropic.
             # OpenAI (including gpt-5-nano) returns all N tool calls at once when
