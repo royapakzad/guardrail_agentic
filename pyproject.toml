@@ -29,7 +29,8 @@ dependencies = [
 agentic = [
     "ddgs>=6.0.0",            # DuckDuckGo backend (default; no API key)
     "requests>=2.31.0",       # SearXNG JSON API, fetch_url, check_url_validity
-    "beautifulsoup4>=4.12.0", # HTML → text extraction for the DDG/SearXNG fetch path
+    "trafilatura>=2.0.0",     # main-content extraction (clean text, no boilerplate) for fetch_url
+    "beautifulsoup4>=4.12.0", # fallback HTML → text extraction for the DDG/SearXNG fetch path
     "tavily-python>=0.3.0",   # Tavily backend (managed search + extract API)
     "tiktoken>=0.7.0",        # exact token counts for the non-agentic path
 ]

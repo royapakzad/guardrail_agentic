@@ -305,9 +305,11 @@ def _summarize_tool_result(tool_name: str, args: dict, result_str: str) -> str:
         return f"search_web('{args.get('query', '')}') → no results"
 
     if tool_name == "fetch_url":
+        # fetch_url returns clean main-content text (no HTML/boilerplate). Feed the
+        # actual text into the conversation so the judge can verify claims against
+        # it — a 200-char preview is useless for that. Already capped at MAX_FETCH_CHARS.
         content = data.get("content", "")
-        preview = content[:200].replace("\n", " ")
-        return f"fetch_url('{args.get('url', '')}'): {len(content)} chars — {preview}"
+        return f"fetch_url('{args.get('url', '')}') [{len(content)} chars]:\n{content}"
 
     if tool_name == "check_url_validity":
         valid = data.get("valid", False)

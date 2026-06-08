@@ -108,13 +108,20 @@ def _search_duckduckgo(query: str, max_results: int) -> list[dict[str, str]]:
         raise ToolError(f"DuckDuckGo search failed: {exc}") from exc
 
 
-def _fetch_requests_bs4(url: str, max_chars: int) -> str:
-    """Fetch via requests + BeautifulSoup (used by DuckDuckGo and SearXNG)."""
+def _fetch_main_text(url: str, max_chars: int) -> str:
+    """
+    Fetch a URL and return its MAIN readable text — never raw HTML.
+
+    Uses trafilatura to extract the article/main content (dropping nav, menus,
+    cookie banners, ads, headers, and footers) so only clean prose enters the
+    judge's context window. Falls back to a BeautifulSoup get_text() pass if
+    trafilatura is unavailable or extracts nothing. Used by the DuckDuckGo and
+    SearXNG backends (Tavily has its own extract API).
+    """
     try:
         import requests
-        from bs4 import BeautifulSoup
     except ImportError as exc:
-        raise ToolError(f"Missing dependency: {exc}. Run: pip install requests beautifulsoup4") from exc
+        raise ToolError(f"Missing dependency: {exc}. Run: pip install requests") from exc
     try:
         resp = requests.get(
             url,
@@ -124,9 +131,33 @@ def _fetch_requests_bs4(url: str, max_chars: int) -> str:
         resp.raise_for_status()
     except Exception as exc:
         raise ToolError(f"Failed to fetch {url!r}: {exc}") from exc
+
+    html = resp.text
+
+    # Preferred: trafilatura main-content extraction → clean plain text.
+    extracted: str | None = None
     try:
-        soup = BeautifulSoup(resp.text, "html.parser")
-        for tag in soup(["script", "style", "nav", "footer", "header"]):
+        import trafilatura
+
+        extracted = trafilatura.extract(
+            html,
+            include_comments=False,
+            include_tables=True,
+            favor_recall=True,
+        )
+    except ImportError:
+        extracted = None
+    if extracted and extracted.strip():
+        return extracted.strip()[:max_chars]
+
+    # Fallback: BeautifulSoup with non-content tags removed, then plain text.
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError as exc:
+        raise ToolError(f"Missing dependency: {exc}. Run: pip install beautifulsoup4") from exc
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "form"]):
             tag.decompose()
         return soup.get_text(separator="\n", strip=True)[:max_chars]
     except Exception as exc:
@@ -179,7 +210,7 @@ def _search_searxng(query: str, max_results: int) -> list[dict[str, str]]:
 
 
 # SearXNG uses the same requests+BS4 fetch as DuckDuckGo
-_fetch_searxng = _fetch_requests_bs4
+_fetch_searxng = _fetch_main_text
 
 
 # ── Tavily backend ────────────────────────────────────────────────────────────
@@ -256,9 +287,9 @@ def search_web(query: str, max_results: int = MAX_SEARCH_RESULTS) -> list[dict[s
 def fetch_url(url: str, max_chars: int = MAX_FETCH_CHARS) -> str:
     """Fetch a URL and return visible text (truncated). Uses the configured backend."""
     if _active_backend == BACKEND_DUCKDUCKGO:
-        return _fetch_requests_bs4(url, max_chars)
+        return _fetch_main_text(url, max_chars)
     if _active_backend == BACKEND_SEARXNG:
-        return _fetch_requests_bs4(url, max_chars)
+        return _fetch_main_text(url, max_chars)
     if _active_backend == BACKEND_TAVILY:
         return _fetch_tavily(url, max_chars)
     raise ToolError(f"Unknown backend: {_active_backend!r}")
