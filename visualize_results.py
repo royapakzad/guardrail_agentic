@@ -1,6 +1,10 @@
 """
 visualize_results.py  —  Multilingual LLM Guardrail Evaluation Dashboard
 Usage: streamlit run visualize_results.py
+
+Score integrity: scores are read directly from the JSON output fields, which are
+already verified against explanation arithmetic during evaluation (see agentic_runner.py
+_rederive_score_from_explanation). The displayed score is authoritative.
 """
 from __future__ import annotations
 
@@ -25,49 +29,320 @@ st.set_page_config(
 # ── CSS ────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-html, body, [class*="css"], .stApp, .stMarkdown, p, span, div, td, th, label {
-    font-family: 'Inter', sans-serif !important;
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+
+/* ── Force light theme globally ── */
+html, body, .stApp { background-color: #F7F9FC !important; }
+[class*="css"], .stMarkdown, p, span, div, td, th, label, li {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    color: #1E293B;
 }
 #MainMenu, footer, header { visibility: hidden; }
 
-[data-testid="metric-container"] {
-    background: #fff; border: 1px solid #E2E8F0; border-radius: 12px;
-    padding: 16px 18px !important; box-shadow: 0 1px 3px rgba(0,0,0,.05);
-}
-[data-testid="stMetricValue"]  { font-size:1.6rem !important; font-weight:800 !important; color:#0F172A !important; }
-[data-testid="stMetricLabel"]  { font-size:.70rem !important; font-weight:600 !important; color:#64748B !important; text-transform:uppercase; letter-spacing:.06em; }
-[data-testid="stMetricDelta"]  { font-size:.80rem !important; font-weight:500 !important; }
+/* ── Main content area ── */
+.block-container { background: #F7F9FC !important; padding-top: 2rem !important; }
+section[data-testid="stMain"] { background: #F7F9FC !important; }
 
-[data-testid="stSidebar"] { background:#0F2448 !important; }
+/* ════════════════════════════════════════════════════════════════
+   WIDGET OVERRIDES — force light bg on every Streamlit component
+   ════════════════════════════════════════════════════════════════ */
+
+/* SelectBox + MultiSelect outer pill */
+[data-testid="stSelectbox"] > div > div,
+[data-testid="stMultiSelect"] > div > div {
+    background-color: #fff !important; border: 1px solid #E2E8F0 !important;
+    border-radius: 8px !important; color: #1E293B !important;
+}
+/* BaseWeb select control box */
+[data-baseweb="select"] > div:first-child {
+    background-color: #fff !important; border-color: #E2E8F0 !important;
+    border-radius: 8px !important; min-height: 38px;
+}
+[data-baseweb="select"] * { color: #1E293B !important; }
+[data-baseweb="select"] svg { fill: #64748B !important; }
+/* Dropdown open-list */
+[data-baseweb="popover"] { z-index: 9999 !important; }
+[data-baseweb="menu"], [data-baseweb="list"] {
+    background-color: #fff !important; border: 1px solid #E2E8F0 !important;
+    border-radius: 8px !important; box-shadow: 0 8px 24px rgba(15,23,42,.10) !important;
+}
+[data-baseweb="list-item"], [data-baseweb="option"] {
+    background-color: #fff !important; color: #1E293B !important;
+    font-size: .87rem !important;
+}
+[data-baseweb="list-item"]:hover { background-color: #EFF6FF !important; }
+/* MultiSelect tag chips (e.g. "en ×") */
+[data-baseweb="tag"] {
+    background-color: #EFF6FF !important; border: 1px solid #BFDBFE !important;
+    border-radius: 6px !important;
+}
+[data-baseweb="tag"] span, [data-baseweb="tag"] button { color: #1D4ED8 !important; }
+/* Input fields */
+[data-baseweb="input"], [data-baseweb="base-input"],
+[data-testid="stTextInput"] input, [data-testid="stNumberInput"] input {
+    background-color: #fff !important; color: #1E293B !important;
+    border-color: #E2E8F0 !important;
+}
+/* Checkbox */
+[data-testid="stCheckbox"] label { color: #334155 !important; font-size: .86rem !important; }
+[data-baseweb="checkbox"] div[role="checkbox"] {
+    border-color: #94A3B8 !important; background-color: #fff !important;
+    border-radius: 4px !important;
+}
+/* Radio */
+[data-testid="stRadio"] label { color: #334155 !important; }
+[data-testid="stRadio"] div[role="radiogroup"] label span { color: #475569 !important; }
+/* File uploader */
+[data-testid="stFileUploader"] section {
+    background: #fff !important; border: 2px dashed #CBD5E1 !important;
+    border-radius: 10px !important; padding: 12px !important;
+}
+[data-testid="stFileUploader"] label,
+[data-testid="stFileUploader"] p { color: #64748B !important; }
+/* DataFrame container */
+[data-testid="stDataFrame"] {
+    background: #fff !important; border: 1px solid #E2E8F0 !important;
+    border-radius: 10px !important; overflow: hidden;
+}
+[data-testid="stDataFrame"] > div { background: #fff !important; }
+/* Caption */
+[data-testid="stCaptionContainer"] p, .stCaption {
+    color: #64748B !important; font-size: .79rem !important;
+}
+/* Buttons */
+[data-testid="baseButton-secondary"], button[kind="secondary"] {
+    background: #fff !important; border: 1px solid #E2E8F0 !important;
+    color: #334155 !important; border-radius: 8px !important;
+}
+[data-testid="baseButton-primary"], button[kind="primary"] {
+    background: #2563EB !important; color: #fff !important;
+    border-radius: 8px !important; border: none !important;
+}
+/* Column headers and container backgrounds */
+[data-testid="column"] { background: transparent !important; }
+/* Expanders — light background */
+details { background: #fff !important; }
+summary { color: #1E293B !important; font-weight: 600 !important; }
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] {
+    background: #1E293B !important;
+    border-right: 1px solid #334155;
+}
 [data-testid="stSidebar"] .stMarkdown,
 [data-testid="stSidebar"] p,
 [data-testid="stSidebar"] span,
 [data-testid="stSidebar"] label,
-[data-testid="stSidebar"] div { color:#CBD5E1 !important; }
+[data-testid="stSidebar"] div { color: #CBD5E1 !important; }
 [data-testid="stSidebar"] h1,
 [data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3 { color:#F1F5F9 !important; font-weight:700 !important; }
-[data-testid="stSidebar"] .stSelectbox > div > div { background:#1E3A5F !important; border-color:#334155 !important; color:#E2E8F0 !important; }
-[data-testid="stSidebar"] hr { border-color:#1E3A5F !important; }
+[data-testid="stSidebar"] h3 { color: #F1F5F9 !important; font-weight: 700 !important; }
+[data-testid="stSidebar"] .stSelectbox > div > div {
+    background: #334155 !important; border-color: #475569 !important; color: #E2E8F0 !important;
+}
+[data-testid="stSidebar"] hr { border-color: #334155 !important; }
+[data-testid="stSidebar"] .stFileUploader label { color: #94A3B8 !important; }
 
-.stTabs [data-baseweb="tab-list"] { gap:4px; border-bottom:2px solid #E2E8F0; }
-.stTabs [data-baseweb="tab"] { font-weight:500; font-size:.88rem; color:#64748B; padding:8px 16px; border-radius:8px 8px 0 0; }
-.stTabs [aria-selected="true"] { color:#1B3A6B !important; font-weight:700 !important; border-bottom:2px solid #3B82F6 !important; }
+/* ── Metrics ── */
+[data-testid="metric-container"] {
+    background: #fff; border: 1px solid #E2E8F0; border-radius: 10px;
+    padding: 14px 16px !important; box-shadow: 0 1px 4px rgba(15,23,42,.06);
+}
+[data-testid="stMetricValue"] { font-size:1.5rem !important; font-weight:800 !important; color:#0F172A !important; }
+[data-testid="stMetricLabel"] { font-size:.68rem !important; font-weight:600 !important; color:#64748B !important; text-transform:uppercase; letter-spacing:.06em; }
+[data-testid="stMetricDelta"] { font-size:.78rem !important; font-weight:500 !important; }
 
-h1 { font-size:1.45rem !important; font-weight:800 !important; color:#0F172A !important; letter-spacing:-.03em; }
-h2 { font-size:1.10rem !important; font-weight:700 !important; color:#1E293B !important; }
-h3 { font-size:.92rem  !important; font-weight:600 !important; color:#334155 !important; }
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 2px; border-bottom: 2px solid #E2E8F0; background: transparent;
+}
+.stTabs [data-baseweb="tab"] {
+    font-weight: 500; font-size: .86rem; color: #64748B;
+    padding: 8px 18px; border-radius: 8px 8px 0 0; background: transparent;
+}
+.stTabs [aria-selected="true"] {
+    color: #2563EB !important; font-weight: 700 !important;
+    border-bottom: 2px solid #2563EB !important; background: #EFF6FF !important;
+}
 
-[data-testid="stDataFrame"] th { font-weight:600 !important; font-size:.74rem !important; text-transform:uppercase; letter-spacing:.05em; color:#475569 !important; background:#F8FAFC !important; }
+/* ── Headings ── */
+h1 { font-size:1.4rem !important; font-weight:800 !important; color:#0F172A !important; letter-spacing:-.02em; margin-bottom:.25rem; }
+h2 { font-size:1.05rem !important; font-weight:700 !important; color:#1E293B !important; margin:.5rem 0 .25rem; }
+h3 { font-size:.90rem !important; font-weight:600 !important; color:#334155 !important; }
+strong { color: #0F172A !important; }
 
-.badge-pass { display:inline-block; background:#DCFCE7; color:#166534; font-weight:700; font-size:.70rem; padding:2px 8px; border-radius:999px; }
-.badge-fail { display:inline-block; background:#FEE2E2; color:#991B1B; font-weight:700; font-size:.70rem; padding:2px 8px; border-radius:999px; }
-.score-big  { font-size:2.8rem; font-weight:800; line-height:1; letter-spacing:-.04em; }
-.label-sm   { font-size:.70rem; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:#94A3B8; margin-bottom:6px; }
-.alert-changed { background:#FFF7ED; border:1px solid #FDBA74; border-left:4px solid #F97316; border-radius:8px; padding:10px 14px; color:#7C2D12; font-weight:500; margin:8px 0 12px 0; }
-.info-card { background:#F0F9FF; border:1px solid #BAE6FD; border-radius:10px; padding:12px 16px; margin:6px 0; font-size:.86rem; color:#0C4A6E; }
-.chip { display:inline-block; padding:3px 10px; border-radius:999px; font-size:.75rem; font-weight:600; margin:2px; }
+/* ── DataFrames ── */
+[data-testid="stDataFrame"] th {
+    font-weight:600 !important; font-size:.72rem !important; text-transform:uppercase;
+    letter-spacing:.05em; color:#475569 !important; background:#F1F5F9 !important;
+}
+[data-testid="stDataFrame"] td { color:#334155 !important; font-size:.83rem !important; }
+
+/* ── Expanders ── */
+[data-testid="stExpander"] {
+    background: #fff; border: 1px solid #E2E8F0 !important;
+    border-radius: 10px !important; overflow: hidden;
+}
+[data-testid="stExpander"] summary {
+    font-weight: 600 !important; font-size: .86rem !important;
+    color: #1E293B !important; padding: 10px 14px;
+}
+
+/* ── Info / success / warning / error boxes ── */
+[data-testid="stInfo"]    { background:#EFF6FF; border-left:3px solid #3B82F6; border-radius:8px; color:#1E3A5F !important; }
+[data-testid="stSuccess"] { background:#F0FDF4; border-left:3px solid #22C55E; border-radius:8px; color:#14532D !important; }
+[data-testid="stWarning"] { background:#FFFBEB; border-left:3px solid #F59E0B; border-radius:8px; color:#78350F !important; }
+[data-testid="stError"]   { background:#FEF2F2; border-left:3px solid #EF4444; border-radius:8px; color:#7F1D1D !important; }
+
+/* ── Dividers ── */
+hr { border-color: #E2E8F0 !important; margin: 1rem 0; }
+
+/* ════════════════════════════════════════════════════════════════
+   CUSTOM COMPONENT CLASSES
+   ════════════════════════════════════════════════════════════════ */
+
+/* Pass / Fail badges (small, inline) */
+.badge-pass {
+    display:inline-block; background:#DCFCE7; color:#166534 !important;
+    font-weight:700; font-size:.68rem; padding:3px 9px; border-radius:999px;
+    letter-spacing:.03em;
+}
+.badge-fail {
+    display:inline-block; background:#FEE2E2; color:#991B1B !important;
+    font-weight:700; font-size:.68rem; padding:3px 9px; border-radius:999px;
+    letter-spacing:.03em;
+}
+
+/* Small uppercase path label */
+.label-sm {
+    font-size:.66rem; font-weight:700; text-transform:uppercase;
+    letter-spacing:.10em; color:#94A3B8 !important; margin-bottom:4px;
+    display:block;
+}
+
+/* Judgment-changed alert bar */
+.alert-changed {
+    background:#FFF7ED; border:1px solid #FED7AA; border-left:4px solid #F97316;
+    border-radius:8px; padding:10px 16px; color:#7C2D12 !important;
+    font-weight:500; font-size:.87rem; margin:0 0 16px 0;
+}
+
+/* Info card (blue) */
+.info-card {
+    background:#EFF6FF; border:1px solid #BFDBFE; border-radius:8px;
+    padding:10px 14px; font-size:.84rem; color:#1E3A5F !important;
+}
+
+/* Model / filter chip */
+.chip {
+    display:inline-block; padding:3px 10px; border-radius:999px;
+    font-size:.73rem; font-weight:600; margin:2px;
+}
+
+/* ── Verdict hero (large PASS / FAIL / BORDERLINE) ── */
+.verdict-hero {
+    font-size: 2.0rem; font-weight: 900; line-height: 1.1;
+    letter-spacing: -.03em; margin-bottom: 2px;
+}
+.verdict-pass       { color: #059669 !important; }
+.verdict-fail       { color: #DC2626 !important; }
+.verdict-borderline { color: #D97706 !important; }
+.verdict-unknown    { color: #94A3B8 !important; }
+
+/* Verdict card container */
+.verdict-card {
+    background: #fff; border: 1px solid #E2E8F0; border-radius: 12px;
+    padding: 18px 20px; box-shadow: 0 1px 4px rgba(15,23,42,.05);
+    margin-bottom: 12px;
+}
+
+/* Confidence chips */
+.conf-high   { display:inline-block; background:#D1FAE5; color:#065F46 !important; font-size:.66rem; font-weight:700; padding:2px 8px; border-radius:999px; letter-spacing:.04em; }
+.conf-medium { display:inline-block; background:#FEF3C7; color:#92400E !important; font-size:.66rem; font-weight:700; padding:2px 8px; border-radius:999px; letter-spacing:.04em; }
+.conf-low    { display:inline-block; background:#FEE2E2; color:#991B1B !important; font-size:.66rem; font-weight:700; padding:2px 8px; border-radius:999px; letter-spacing:.04em; }
+
+/* Secondary score line */
+.score-secondary {
+    font-size: .95rem; font-weight: 600; color: #64748B !important;
+    margin-top: 4px;
+}
+
+/* ── Criteria comparison table ── */
+.crit-table {
+    background: #fff; border: 1px solid #E2E8F0; border-radius: 10px;
+    overflow: hidden; margin: 12px 0;
+}
+.crit-header {
+    background: #F8FAFC; border-bottom: 2px solid #E2E8F0;
+    padding: 8px 12px; font-size: .68rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .08em; color: #64748B !important;
+}
+.crit-row {
+    padding: 10px 12px; border-bottom: 1px solid #F1F5F9;
+    transition: background .1s;
+}
+.crit-row:last-child { border-bottom: none; }
+.crit-name {
+    font-size: .82rem; font-weight: 600; color: #334155 !important;
+    letter-spacing: .01em;
+}
+.crit-name-changed {
+    font-size: .82rem; font-weight: 700; color: #2563EB !important;
+    letter-spacing: .01em;
+}
+
+/* Verdict badges (in criteria table) — solid fill, white text */
+.crit-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: .72rem; font-weight: 700; padding: 3px 10px;
+    border-radius: 999px; letter-spacing: .02em; white-space: nowrap;
+}
+.badge-compliant    { background: #059669; color: #fff !important; }
+.badge-minor        { background: #D97706; color: #fff !important; }
+.badge-major        { background: #EA580C; color: #fff !important; }
+.badge-critical     { background: #DC2626; color: #fff !important; }
+.badge-empty        { background: #E2E8F0; color: #64748B !important; }
+
+/* ── Improvement items ── */
+.impr-section {
+    background: #fff; border: 1px solid #FDE68A; border-radius: 10px;
+    padding: 12px 16px; margin: 8px 0;
+}
+.impr-section-title {
+    font-size: .72rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .08em; color: #92400E !important; margin-bottom: 8px;
+}
+.impr-item {
+    display: flex; align-items: flex-start; gap: 8px;
+    background: #FFFBEB; border: 1px solid #FDE68A;
+    border-left: 3px solid #F59E0B; border-radius: 6px;
+    padding: 7px 10px; margin: 4px 0;
+    font-size: .83rem; line-height: 1.5; color: #78350F !important;
+}
+.impr-item::before {
+    content: "→"; color: #F59E0B !important;
+    font-weight: 700; flex-shrink: 0; margin-top: 1px;
+}
+.impr-inline {
+    font-size: .78rem; color: #92400E !important; line-height: 1.4;
+    padding: 4px 8px 4px 10px; margin: 3px 0 3px 4px;
+    border-left: 2px solid #FCD34D; display: block;
+}
+
+/* ── Explanation section ── */
+.expl-panel {
+    background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px;
+    padding: 14px 16px; font-size: .83rem; line-height: 1.7;
+    color: #334155 !important;
+}
+.expl-panel strong { color: #0F172A !important; font-weight: 700; }
+
+/* ── Change indicator (⚡) ── */
+.changed-tag {
+    display: inline-block; background: #EFF6FF; color: #2563EB !important;
+    font-size: .65rem; font-weight: 700; padding: 1px 6px;
+    border-radius: 4px; margin-left: 4px; letter-spacing: .03em;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -154,6 +429,197 @@ def ensure_list(val) -> list:
 
 def avg(lst):
     return sum(lst) / len(lst) if lst else None
+
+_NUMBERED_RE  = re.compile(r"^(\d+)\.\s+([\w][^\n:]{2,60}?):\s*(.*)", re.DOTALL | re.IGNORECASE)
+_VERDICT_INLINE_RE = re.compile(r"(?:→|->)\s*(Verdict\s*:.*)", re.IGNORECASE)
+_VERDICT_LINE_RE2  = re.compile(r"^(?:→|->)\s*(Verdict\s*:.*)", re.IGNORECASE)
+
+def _verdict_text_to_category(vtext: str) -> str:
+    """Map 'Verdict: minor violation (−0.10)' → 'MINOR_ISSUE' etc."""
+    vl = vtext.lower()
+    if "severe" in vl or "critical" in vl:                        return "CRITICAL"
+    if "significant" in vl or "major" in vl:                      return "MAJOR_ISSUE"
+    if "minor" in vl:                                             return "MINOR_ISSUE"
+    if "compliant" in vl or "no violation" in vl or "n/a" in vl: return "COMPLIANT"
+    return "COMPLIANT"
+
+def _parse_verdicts_from_explanation(explanation: str) -> list[dict]:
+    """
+    Fallback: extract per-criterion verdicts from the numbered explanation text.
+
+    Used when criteria_verdicts is absent — e.g. data run before categorical
+    output was added, or when the judge produced old-format JSON.  Parses both
+    inline verdicts ('... → Verdict: minor violation') and verdicts on their
+    own line ('→ Verdict: compliant').
+    """
+    if not explanation or explanation == "—":
+        return []
+    verdicts: list[dict] = []
+    pending_criterion: str | None = None
+
+    for raw in explanation.split("\n"):
+        line = raw.strip()
+        if not line or line.upper().startswith("DEDUCTION SUMMARY"):
+            break
+
+        # Standalone verdict line belonging to the previous criterion
+        vm = _VERDICT_LINE_RE2.match(line)
+        if vm and pending_criterion:
+            verdicts.append({
+                "criterion": pending_criterion,
+                "verdict": _verdict_text_to_category(vm.group(1)),
+                "issues": [], "improvements": [], "_parsed": True,
+            })
+            pending_criterion = None
+            continue
+
+        # Numbered criterion line (may contain inline verdict)
+        m = _NUMBERED_RE.match(line)
+        if m:
+            crit = m.group(2).strip().upper()
+            rest = m.group(3).strip()
+            vi = _VERDICT_INLINE_RE.search(rest)
+            if vi:
+                verdicts.append({
+                    "criterion": crit,
+                    "verdict": _verdict_text_to_category(vi.group(1)),
+                    "issues": [], "improvements": [], "_parsed": True,
+                })
+                pending_criterion = None
+            else:
+                # Verdict may be on the next line
+                pending_criterion = crit
+
+    return verdicts
+
+
+def _derive_verdict(score, stored: str = "") -> str:
+    """Return overall_verdict from stored field or derive from score."""
+    if stored: return stored
+    if score is None: return ""
+    s = float(score)
+    if s >= 0.70: return "PASS"
+    if s <= 0.55: return "FAIL"
+    return "BORDERLINE"
+
+def _derive_confidence(score, stored: str = "") -> str:
+    """Return confidence from stored field or derive from score.
+    HIGH  : score ≤ 0.40 or ≥ 0.80  (far from 0.6 threshold — clear verdict)
+    MEDIUM: score ≤ 0.55 or ≥ 0.70  (moderate distance)
+    LOW   : score between 0.55–0.70  (borderline — close to threshold)
+    """
+    if stored: return stored
+    if score is None: return "LOW"
+    s = float(score)
+    if s <= 0.40 or s >= 0.80: return "HIGH"
+    if s <= 0.55 or s >= 0.70: return "MEDIUM"
+    return "LOW"
+
+def _verdict_html(verdict: str) -> str:
+    color_cls = {"PASS": "verdict-pass", "FAIL": "verdict-fail",
+                 "BORDERLINE": "verdict-borderline"}.get(verdict, "verdict-unknown")
+    return f'<div class="verdict-hero {color_cls}">{verdict or "—"}</div>'
+
+def _conf_html(conf: str) -> str:
+    css = {"HIGH": "conf-high", "MEDIUM": "conf-medium", "LOW": "conf-low"}.get(conf, "conf-low")
+    label = {"HIGH": "✓ High confidence", "MEDIUM": "~ Medium confidence",
+             "LOW": "⚠ Borderline"}.get(conf, conf)
+    return f'<span class="{css}">{label}</span>'
+
+
+def _render_explanation(explanation: str) -> str:
+    """
+    Render a numbered-criterion explanation as clean markdown.
+
+    The explanation format (both non-agentic and agentic) is:
+      1. CRITERION NAME: [assessment text] → Verdict: ...
+      2. CRITERION NAME: ...
+      DEDUCTION SUMMARY:
+      Base: 1.0
+      ...
+      Final score: max(0.05, 1.0 − X.XX) = Y.YY
+
+    Each numbered criterion is rendered as a sub-heading; the DEDUCTION SUMMARY
+    is rendered as a code block for easy reading. If the explanation doesn't
+    match this format (e.g. legacy free-form text), it is returned as-is in a
+    blockquote.
+    """
+    if not explanation or explanation == "—":
+        return "> —"
+
+    lines = explanation.split("\n")
+    md_parts: list[str] = []
+    in_deduction = False
+    deduction_lines: list[str] = []
+
+    # Case-insensitive: matches "1. ACTIONABILITY AND PRACTICALITY:" and
+    # "1. Actionability and Practicality:" and anything in between.
+    numbered_re = re.compile(
+        r"^(\d+)\.\s+([\w][^\n:]{2,60}?):\s*(.*)",
+        re.DOTALL | re.IGNORECASE,
+    )
+    # Handles both Unicode → (U+2192) and ASCII -> as verdict separators,
+    # whether inline ("... → Verdict:") or on their own line ("→ Verdict:").
+    _ARROW_RE = re.compile(r"\s*(?:→|->)\s*")
+    # Matches a standalone verdict line that starts with the arrow:
+    #   "→ Verdict: compliant"  or  "-> Verdict: minor violation (-0.10)"
+    _VERDICT_LINE_RE = re.compile(r"^(?:→|->)\s*(Verdict\s*:.*)", re.IGNORECASE)
+
+    def _verdict_emoji(verdict: str) -> str:
+        vl = verdict.lower()
+        if "severe"       in vl: return f"🔴 _{verdict}_"
+        if "significant"  in vl: return f"🟠 _{verdict}_"
+        if "minor"        in vl: return f"🟡 _{verdict}_"
+        return f"🟢 _{verdict}_"
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if line.upper().startswith("DEDUCTION SUMMARY"):
+            in_deduction = True
+            deduction_lines.append(line)
+            continue
+
+        if in_deduction:
+            deduction_lines.append(line)
+            continue
+
+        # Case 1: standalone verdict line "→ Verdict: ..." on its own line.
+        # Non-agentic explanations often put the verdict on a new line after
+        # the assessment text, so the inline arrow split above never fires.
+        vm = _VERDICT_LINE_RE.match(line)
+        if vm:
+            md_parts.append(_verdict_emoji(vm.group(1).strip()))
+            continue
+
+        # Case 2: numbered criterion line "N. CRITERION: assessment [→ Verdict: ...]"
+        m = numbered_re.match(line)
+        if m:
+            num, criterion, rest = m.group(1), m.group(2).strip(), m.group(3).strip()
+            verdict = ""
+            assessment = rest
+            # Verdict may be inline: "... → Verdict: compliant"
+            arrow_split = _ARROW_RE.split(rest, maxsplit=1)
+            if len(arrow_split) == 2:
+                assessment = arrow_split[0].strip()
+                verdict = arrow_split[1].strip()
+            md_parts.append(f"\n**{num}. {criterion.upper()}**")
+            if assessment:
+                md_parts.append(f"{assessment}")
+            if verdict:
+                md_parts.append(_verdict_emoji(verdict))
+        else:
+            md_parts.append(line)
+
+    if deduction_lines:
+        md_parts.append("\n**DEDUCTION SUMMARY**")
+        md_parts.append("```\n" + "\n".join(deduction_lines) + "\n```")
+
+    rendered = "\n".join(md_parts).strip()
+    return rendered if rendered else f"> {explanation}"
+
 
 def extract_urls_from_text(text: str) -> list[str]:
     urls = []
@@ -284,11 +750,14 @@ for fname, rows in raw.items():
     lbl   = file_labels[fname]
     color = model_colors.get(lbl, "#3B82F6")
     asst  = rows[0].get("model", "?")
+    # Show web search backend if recorded in the data
+    web_tool = rows[0].get("web_search_tool", "")
+    web_badge = f" · 🔍 {web_tool}" if web_tool else ""
     st.sidebar.markdown(
         f'<span class="chip" style="background:{color}22;color:{color};border:1px solid {color}44">{lbl}</span>',
         unsafe_allow_html=True,
     )
-    st.sidebar.caption(f"`{fname}`  \n{len(rows)} scenarios · asst: {asst}")
+    st.sidebar.caption(f"`{fname}`  \n{len(rows)} scenarios · asst: {asst}{web_badge}")
 
 # ── UNIFIED FLAT DATAFRAME ─────────────────────────────────────────────────────
 records = []
@@ -681,25 +1150,22 @@ with tab_inspect:
     st.markdown("---")
     st.markdown("### Single scenario deep-dive")
 
-    dc1, dc2, dc3, dc4 = st.columns([3, 1, 2, 2])
+    dc1, dc2, dc3 = st.columns([3, 2, 2])
     with dc1:
-        all_ids = sorted(df["id"].unique(), key=lambda x: (int(x) if str(x).isdigit() else x))
+        all_ids = sorted(df["id"].unique())
         sel_sid = st.selectbox(
             "Scenario ID", all_ids,
             format_func=lambda s: f"[{s}] {df[df['id']==s]['scenario'].iloc[0][:52]}…" if not df[df['id']==s].empty else s,
             key="ds",
         )
     with dc2:
-        avail_langs_d = sorted(df[df["id"] == sel_sid]["language"].unique())
-        sel_lang_d = st.selectbox("Language", avail_langs_d, key="dl")
-    with dc3:
         sel_file = st.selectbox("File", list(raw.keys()), format_func=lambda f: file_labels[f], key="df")
-    with dc4:
+    with dc3:
         sel_pol_d = st.selectbox("Policy", all_policies, key="dp") if all_policies else None
 
-    det_rows = [r for r in raw[sel_file] if str(r.get("id","")) == str(sel_sid) and r.get("language","") == sel_lang_d]
+    det_rows = [r for r in raw[sel_file] if str(r.get("id","")) == str(sel_sid)]
     if not det_rows:
-        st.warning(f"Scenario {sel_sid} (language: {sel_lang_d}) not found in {file_labels[sel_file]}.")
+        st.warning(f"Scenario {sel_sid} not found in {file_labels[sel_file]}.")
     elif not sel_pol_d:
         st.warning("No policy selected.")
     else:
@@ -734,22 +1200,155 @@ with tab_inspect:
                 unsafe_allow_html=True,
             )
 
-        v1, _mid, v2 = st.columns([5,1,5])
+        # ── Read categorical fields (derive from score if absent / old data) ──
+        na_overall = _derive_verdict(na_s, det.get(f"{lbl}_nonagentic_overall_verdict",""))
+        ag_overall = _derive_verdict(ag_s, det.get(f"{lbl}_agentic_overall_verdict",""))
+        na_conf    = _derive_confidence(na_s, det.get(f"{lbl}_nonagentic_confidence",""))
+        ag_conf    = _derive_confidence(ag_s, det.get(f"{lbl}_agentic_confidence",""))
+        na_cv      = ensure_list(det.get(f"{lbl}_nonagentic_criteria_verdicts", []))
+        ag_cv      = ensure_list(det.get(f"{lbl}_agentic_criteria_verdicts", []))
+        tool_changed = ensure_list(det.get(f"{lbl}_agentic_tool_changed_verdict_for", []))
+
+        # Fallback: if criteria_verdicts absent, parse from explanation text.
+        # This handles data run before categorical output was added, or cases
+        # where the judge produced old-format JSON without the structured list.
+        ag_expl_raw = det.get(f"{lbl}_agentic_explanation", "") or ""
+        na_expl_raw = det.get(f"{lbl}_nonagentic_explanation", "") or ""
+        _ag_parsed = False
+        _na_parsed = False
+        if not ag_cv and ag_expl_raw:
+            ag_cv = _parse_verdicts_from_explanation(ag_expl_raw)
+            _ag_parsed = bool(ag_cv)
+        if not na_cv and na_expl_raw:
+            na_cv = _parse_verdicts_from_explanation(na_expl_raw)
+            _na_parsed = bool(na_cv)
+        ag_improvements = ensure_list(det.get(f"{lbl}_agentic_improvements", []))
+        na_improvements = ensure_list(det.get(f"{lbl}_nonagentic_improvements", []))
+        all_improvements = ag_improvements or na_improvements
+
+        # Maps verdict → solid badge class (white text on colored bg)
+        _BADGE_CLS = {
+            "COMPLIANT":  "badge-compliant",
+            "MINOR_ISSUE":"badge-minor",
+            "MAJOR_ISSUE":"badge-major",
+            "CRITICAL":   "badge-critical",
+        }
+        _BADGE_ICON = {"COMPLIANT":"✓","MINOR_ISSUE":"!","MAJOR_ISSUE":"!!","CRITICAL":"✕"}
+
+        def _crit_badge(verdict: str) -> str:
+            cls  = _BADGE_CLS.get(verdict, "badge-empty")
+            icon = _BADGE_ICON.get(verdict, "·")
+            label = verdict.replace("_", " ") if verdict not in ("—","") else "—"
+            return f'<span class="crit-badge {cls}">{icon} {label}</span>'
+
+        # ── PRIMARY: verdict hero side-by-side ────────────────────────────────
+        v1, _mid, v2 = st.columns([5, 1, 5])
         with v1:
-            st.markdown('<p class="label-sm">🔒 Non-agentic · single LLM call · no tools</p>', unsafe_allow_html=True)
-            st.markdown(f'<div class="score-big" style="color:{score_color(na_s)}">{f"{na_s:.3f}" if na_s is not None else "—"}</div>', unsafe_allow_html=True)
-            st.markdown(fmt_valid_html(score_to_valid(na_s)), unsafe_allow_html=True)
-            st.markdown(f"> {det.get(f'{lbl}_nonagentic_explanation','—')}")
+            st.markdown(
+                '<p class="label-sm">🔒 Non-agentic · single LLM call · no tools</p>',
+                unsafe_allow_html=True)
+            st.markdown(_verdict_html(na_overall), unsafe_allow_html=True)
+            st.markdown(_conf_html(na_conf), unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="score-secondary">Score: '
+                f'<b style="color:{score_color(na_s)}">'
+                f'{f"{na_s:.3f}" if na_s is not None else "—"}</b></div>',
+                unsafe_allow_html=True,
+            )
+
         with _mid:
-            st.markdown("<br><br><br><div style='text-align:center;font-size:1.5rem;color:#CBD5E1'>↔</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div style='text-align:center;font-size:1.2rem;color:#CBD5E1;padding-top:16px'>↔</div>",
+                unsafe_allow_html=True)
+
         with v2:
-            st.markdown(f'<p class="label-sm">🌐 Agentic · {tc} tool call(s)</p>', unsafe_allow_html=True)
-            st.markdown(f'<div class="score-big" style="color:{score_color(ag_s)}">{f"{ag_s:.3f}" if ag_s is not None else "—"}</div>', unsafe_allow_html=True)
-            st.markdown(fmt_valid_html(score_to_valid(ag_s)), unsafe_allow_html=True)
-            if dlt is not None:
-                dc = "#10B981" if dlt > 0.01 else ("#EF4444" if dlt < -0.01 else "#94A3B8")
-                st.markdown(f'<span style="color:{dc};font-weight:600;font-size:.9rem">{delta_arrow(dlt)} vs non-agentic</span>', unsafe_allow_html=True)
-            st.markdown(f"> {det.get(f'{lbl}_agentic_explanation','—')}")
+            st.markdown(
+                f'<p class="label-sm">🌐 Agentic · {tc} tool call(s)</p>',
+                unsafe_allow_html=True)
+            st.markdown(_verdict_html(ag_overall), unsafe_allow_html=True)
+            st.markdown(_conf_html(ag_conf), unsafe_allow_html=True)
+            _dc = "#059669" if (dlt or 0)>0.01 else ("#DC2626" if (dlt or 0)<-0.01 else "#94A3B8")
+            _delta_html = (f' &ensp;<b style="color:{_dc};font-size:.85rem">{delta_arrow(dlt)}</b>' if dlt is not None else "")
+            st.markdown(
+                f'<div class="score-secondary">Score: '
+                f'<b style="color:{score_color(ag_s)}">'
+                f'{f"{ag_s:.3f}" if ag_s is not None else "—"}</b>{_delta_html}</div>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("---")
+
+        # ── SECONDARY: per-criterion categorical table ────────────────────────
+        na_map = {cv.get("criterion","?"): cv for cv in na_cv}
+        ag_map = {cv.get("criterion","?"): cv for cv in ag_cv}
+        all_criteria = list(dict.fromkeys(list(na_map) + list(ag_map)))
+
+        if all_criteria:
+            na_hdr_suffix = " <i>(parsed)</i>" if _na_parsed else ""
+            ag_changed_note = (
+                f' &nbsp;<span class="changed-tag">⚡ {len(tool_changed)} changed by tools</span>'
+                if tool_changed else (" <i>(parsed)</i>" if _ag_parsed else "")
+            )
+            hdr1, hdr2, hdr3 = st.columns([3, 2, 2])
+            hdr1.markdown('<p class="label-sm">Policy criterion</p>', unsafe_allow_html=True)
+            hdr2.markdown(f'<p class="label-sm">Non-agentic{na_hdr_suffix}</p>', unsafe_allow_html=True)
+            hdr3.markdown(f'<p class="label-sm">Agentic{ag_changed_note}</p>', unsafe_allow_html=True)
+
+            for crit in all_criteria:
+                na_v   = na_map.get(crit, {})
+                ag_v   = ag_map.get(crit, {})
+                na_vrd = na_v.get("verdict", "—")
+                ag_vrd = ag_v.get("verdict", "—")
+                changed = crit in tool_changed
+                c1, c2, c3 = st.columns([3, 2, 2])
+                with c1:
+                    name_cls = "crit-name-changed" if changed else "crit-name"
+                    change_tag = '<span class="changed-tag">⚡ changed</span>' if changed else ""
+                    st.markdown(
+                        f'<div class="{name_cls}">{crit} {change_tag}</div>',
+                        unsafe_allow_html=True)
+                with c2:
+                    st.markdown(_crit_badge(na_vrd), unsafe_allow_html=True)
+                with c3:
+                    st.markdown(_crit_badge(ag_vrd), unsafe_allow_html=True)
+
+                imps = ag_v.get("improvements") or []
+                for imp in imps:
+                    if imp.strip():
+                        st.markdown(
+                            f'<div class="impr-inline">{imp}</div>',
+                            unsafe_allow_html=True)
+            st.markdown("")
+
+        # ── Improvements list ─────────────────────────────────────────────────
+        if all_improvements:
+            impr_lines = "".join(
+                f'<div class="impr-item">{imp}</div>'
+                for imp in all_improvements if imp.strip()
+            )
+            st.markdown(
+                f'<div class="impr-section">'
+                f'<div class="impr-section-title">Improvements required for compliance</div>'
+                f'{impr_lines}</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("")
+
+        st.markdown("---")
+
+        # ── DETAIL: explanation text in expander ──────────────────────────────
+        na_expl = det.get(f"{lbl}_nonagentic_explanation", "—") or "—"
+        ag_expl = det.get(f"{lbl}_agentic_explanation", "—") or "—"
+        with st.expander("Explanation detail — full reasoning", expanded=not bool(all_criteria)):
+            ed1, _gap, ed2 = st.columns([5, 1, 5])
+            with ed1:
+                st.markdown('<p class="label-sm">Non-agentic reasoning</p>', unsafe_allow_html=True)
+                st.markdown(_render_explanation(na_expl))
+            with _gap:
+                st.markdown("")
+            with ed2:
+                st.markdown('<p class="label-sm">Agentic reasoning</p>', unsafe_allow_html=True)
+                st.markdown(_render_explanation(ag_expl))
 
         st.markdown("---")
 
@@ -779,30 +1378,55 @@ with tab_inspect:
             with st.expander(f"Tool call log — {len(tool_log)} calls", expanded=False):
                 for i, call in enumerate(tool_log, 1):
                     tn = call.get("tool","?"); inp = call.get("input",{}); prev = call.get("output_preview","")
-                    icon3 = {"search_web":"🔎","fetch_url":"📄","check_url_validity":"🔗"}.get(tn,"🔧")
+                    icon3 = {"search_web":"🔎","fetch_url":"📄","check_url_validity":"🔗","check_acronym":"🔤"}.get(tn,"🔧")
                     lc1, lc2 = st.columns(2)
                     with lc1:
                         st.markdown(f"**{icon3} {i}. `{tn}`**")
                         if isinstance(inp, dict):
                             u = inp.get("url",""); q = inp.get("query","")
-                            if u: st.markdown(f"[{u}]({u})")
-                            elif q: st.code(q)
-                            else: st.code(json.dumps(inp, ensure_ascii=False)[:200])
+                            acr = inp.get("acronym",""); exp = inp.get("claimed_expansion","")
+                            lang = inp.get("context_language","")
+                            if u:
+                                st.markdown(f"[{u}]({u})")
+                            elif q:
+                                st.code(q)
+                            elif acr:
+                                lang_tag = f" `[{lang}]`" if lang else ""
+                                st.markdown(f"**`{acr}`**{lang_tag}")
+                                st.caption(f"claimed: _{exp}_")
+                            else:
+                                st.code(json.dumps(inp, ensure_ascii=False)[:200])
                     with lc2:
                         try:
                             p = json.loads(prev) if isinstance(prev, str) else prev
                             if tn=="search_web" and isinstance(p, list):
-                                for res in p[:3]:
+                                for res in p:
                                     ur = res.get("url",""); ti = res.get("title",ur); sn = res.get("snippet","")
                                     if ur: st.markdown(f"**[{ti}]({ur})**")
-                                    if sn: st.caption(sn[:150])
+                                    if sn: st.caption(sn)
+                            elif tn=="fetch_url" and isinstance(p, dict):
+                                content = p.get("content","")
+                                if content: st.text(content)
                             elif tn=="check_url_validity" and isinstance(p, dict):
                                 vf = p.get("valid",False); sc2 = p.get("status_code","?")
                                 st.markdown(f"{'✅ Valid' if vf else '❌ Invalid'} — HTTP **{sc2}**")
                                 if p.get("error"): st.error(p["error"])
+                            elif tn=="check_acronym" and isinstance(p, dict):
+                                hint = p.get("verdict_hint","unclear")
+                                score_v = p.get("match_score", 0.0)
+                                acr = p.get("acronym",""); exp = p.get("claimed_expansion","")
+                                hint_icon = {"likely_correct":"✅","likely_wrong":"❌"}.get(hint,"⚠️")
+                                st.markdown(f"{hint_icon} **{hint}** (match score: {score_v:.0%})")
+                                st.caption(f"`{acr}` claimed as: _{exp}_")
+                                if p.get("error"): st.warning(p["error"])
+                                srcs = p.get("search_results",[])
+                                for res in srcs:
+                                    ur = res.get("url",""); sn = res.get("snippet","")
+                                    if ur: st.markdown(f"[{ur}]({ur})")
+                                    if sn: st.caption(sn)
                             else:
-                                st.code(json.dumps(p, ensure_ascii=False)[:400])
-                        except: st.text(str(prev)[:300])
+                                st.code(json.dumps(p, ensure_ascii=False, indent=2))
+                        except: st.text(str(prev))
                     if i < len(tool_log):
                         st.markdown('<hr style="border:none;border-top:1px solid #F1F5F9;margin:6px 0">', unsafe_allow_html=True)
 
