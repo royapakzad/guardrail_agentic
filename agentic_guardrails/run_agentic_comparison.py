@@ -20,18 +20,28 @@ Pipeline per scenario row
                                (LLM with search_web / fetch_url tool calls)
   3. Compare both judgments  → score delta, judgment_changed, sources used
 
+Both non-agentic and agentic explanations use the same numbered-criterion format
+(one entry per policy criterion), so the only variable between the two paths is
+whether the judge had access to retrieval tools.
+
 Usage example
 ~~~~~~~~~~~~~
+  # With DuckDuckGo (default, no setup):
   python run_agentic_comparison.py \\
     --input ../data/scenarios_sample_short.csv \\
     --output-prefix ../outputs/agentic_run1 \\
-    --guardrail flowjudge \\
+    --guardrail anyllm \\
     --provider openai --model gpt-5-mini \\
-    --guardrail-provider openai --guardrail-model gpt-5 \\
-    --assistant-system-prompt-file ../config/assistant_system_prompt.txt \\
+    --guardrail-judges openai:gpt-5-nano anthropic:claude-sonnet-4-6 \\
     --policy-files ../config/policy.txt ../config/policy_fa.txt \\
     --rubric-file ../config/rubric.txt \\
-    --max-tool-calls 5
+    --web-search-tool duckduckgo
+
+  # With Tavily (requires TAVILY_API_KEY in .env):
+    --web-search-tool tavily
+
+  # With SearXNG (requires Docker + running SearXNG instance):
+    --web-search-tool searxng
 """
 from __future__ import annotations
 
@@ -65,6 +75,7 @@ from guardrails_runner import (
     load_text_file,
     build_guardrail_input_text,
     run_guardrail_for_policy,
+    _build_nonagentic_hints,
 )
 from agentic_runner import run_agentic_guardrail, AgenticJudgment
 from comparison import compare_judgments
@@ -261,6 +272,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     # ---- Agentic settings ---------------------------------------------------
     p.add_argument(
+        "--web-search-tool",
+        default="duckduckgo",
+        choices=["duckduckgo", "searxng", "tavily"],
+        help=(
+            "Web search backend for the agentic guardrail (default: duckduckgo). "
+            "duckduckgo: no setup required, may rate-limit. "
+            "searxng: self-hosted, requires Docker + SEARXNG_BASE_URL in .env. "
+            "tavily: managed API, requires TAVILY_API_KEY in .env."
+        ),
+    )
+    p.add_argument(
         "--max-tool-calls",
         type=int,
         default=5,
@@ -286,6 +308,7 @@ def process_row(
     policies: List[Tuple[str, str]],
     rubric: str,
     max_tool_calls: int,
+    web_search_tool: str = "duckduckgo",
     verbose: bool = False,
     log_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -351,6 +374,7 @@ def process_row(
             "guardrail_backend": type(guardrail).__name__,
             "guardrail_judges": [j.model_id for j in judges],
             "max_tool_calls_allowed": max_tool_calls,
+            "web_search_tool": web_search_tool,
         }
     )
 
@@ -396,6 +420,10 @@ def process_row(
                 out[f"{base}_nonagentic_valid"] = gr.valid
                 out[f"{base}_nonagentic_score"] = gr.score
                 out[f"{base}_nonagentic_explanation"] = gr.explanation
+                out[f"{base}_nonagentic_overall_verdict"] = gr.overall_verdict
+                out[f"{base}_nonagentic_confidence"] = gr.confidence
+                out[f"{base}_nonagentic_criteria_verdicts"] = gr.criteria_verdicts
+                out[f"{base}_nonagentic_improvements"] = gr.improvements
                 out[f"{base}_nonagentic_prompt_tokens"] = na_prompt_tokens
                 out[f"{base}_nonagentic_completion_tokens"] = na_completion_tokens
                 out[f"{base}_nonagentic_total_tokens"] = na_total_tokens
@@ -443,6 +471,9 @@ def process_row(
             nonagentic_valid = out.get(f"{base}_nonagentic_valid")
             nonagentic_score = out.get(f"{base}_nonagentic_score")
 
+            # Build hints for two-stage targeting (Improvement 4)
+            na_hints = _build_nonagentic_hints(gr) if "gr" in dir() else ""
+
             # 2b. Agentic path
             if verbose:
                 print(f"        agentic eval (max {max_tool_calls} tool calls) ...")
@@ -458,6 +489,8 @@ def process_row(
                     max_tool_calls=max_tool_calls,
                     verbose=verbose,
                     logger=logger,
+                    nonagentic_hints=na_hints,
+                    scenario_language=language or "en",
                     policy_label=f"{policy_label}[{judge.model_id}]",
                 )
             except Exception as e:
@@ -473,6 +506,11 @@ def process_row(
             out[f"{base}_agentic_valid"] = aj.valid
             out[f"{base}_agentic_score"] = aj.score
             out[f"{base}_agentic_explanation"] = aj.explanation
+            out[f"{base}_agentic_overall_verdict"] = aj.overall_verdict
+            out[f"{base}_agentic_confidence"] = aj.confidence
+            out[f"{base}_agentic_criteria_verdicts"] = aj.criteria_verdicts
+            out[f"{base}_agentic_tool_changed_verdict_for"] = aj.tool_changed_verdict_for
+            out[f"{base}_agentic_improvements"] = aj.improvements
             out[f"{base}_agentic_tool_calls_made"] = aj.tool_calls_made
             out[f"{base}_agentic_sources_used"] = aj.sources_used
             out[f"{base}_agentic_tool_call_log"] = aj.tool_call_log
@@ -551,6 +589,12 @@ def main() -> None:
 
     parser = build_arg_parser()
     args = parser.parse_args()
+
+    # ---- Configure web search backend for agentic tools --------------------
+    # Must be done before any tool calls; all workers share the module-level state.
+    import tools as _tools_mod
+    _tools_mod.set_search_backend(args.web_search_tool)
+    print(f"Web search backend: {args.web_search_tool.upper()}")
 
     # ---- Load shared text configs -------------------------------------------
     # These files are read once and passed to every row's evaluation.
@@ -661,7 +705,7 @@ def main() -> None:
     base_keys: set = set(rows_in[0].keys()) if rows_in else set()
     base_keys |= {
         "provider", "model", "assistant_system_prompt", "assistant_response",
-        "guardrail_backend", "max_tool_calls_allowed", "error",
+        "guardrail_backend", "max_tool_calls_allowed", "web_search_tool", "error",
     }
 
     def _flush(rows: list, *, label: str = "") -> None:
@@ -694,6 +738,7 @@ def main() -> None:
                 policies=policies,
                 rubric=rubric,
                 max_tool_calls=args.max_tool_calls,
+                web_search_tool=args.web_search_tool,
                 verbose=args.verbose,
                 log_dir=log_dir,
             )

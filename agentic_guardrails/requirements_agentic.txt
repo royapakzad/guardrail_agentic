@@ -5,13 +5,17 @@
 # any-llm-sdk (already in requirements.txt) provides the unified LLM interface.
 # The agentic runner uses it with tool/function calling enabled.
 
-# Retrieval tools
-ddgs>=9.0.0
-requests>=2.31.0
-beautifulsoup4>=4.12.0
+# ── Retrieval tools (all three backends) ─────────────────────────────────────
+# DuckDuckGo backend (default — no API key needed):
+ddgs>=6.0.0              # unofficial DuckDuckGo search (preferred; also try: duckduckgo-search)
 
-# Token counting — exact token counts for OpenAI/GPT-4 family models (cl100k_base / o200k_base).
-# Used for the non-agentic guardrail path where the any-guardrail library does not expose
-# resp.usage. We count tokens directly from the input and output text we have.
-# For non-OpenAI providers the cl100k_base encoding is used as a close approximation.
+# SearXNG backend (self-hosted — no package needed; just Docker + SEARXNG_BASE_URL in .env):
+requests>=2.31.0         # HTTP client for SearXNG JSON API, fetch_url, and check_url_validity
+beautifulsoup4>=4.12.0   # HTML text extraction used by SearXNG + DuckDuckGo fetch_url
+
+# Tavily backend (managed API — requires TAVILY_API_KEY in .env):
+tavily-python>=0.3.0     # official Tavily client for search + extract APIs
+
+# Token counting — exact token counts for OpenAI/GPT-4 family models.
+# Used for the non-agentic path where any-guardrail does not expose resp.usage.
 tiktoken>=0.7.0
