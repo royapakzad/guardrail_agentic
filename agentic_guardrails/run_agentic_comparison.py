@@ -52,18 +52,7 @@ import os
 import re
 import sys
 import time
-import warnings
 from typing import Any, NamedTuple
-
-# Suppress a harmless Pydantic serialization warning produced by any-guardrail 0.2.2
-# when used with openai>=2.x. The warning fires because the newer OpenAI SDK populates
-# a `parsed` field that any-guardrail's internal model declares as None. Results are
-# unaffected — the GuardrailOutput is captured correctly before serialization runs.
-warnings.filterwarnings(
-    "ignore",
-    message=".*PydanticSerializationUnexpectedValue.*parsed.*",
-    category=UserWarning,
-)
 
 from dotenv import load_dotenv
 

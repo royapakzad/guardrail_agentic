@@ -4,9 +4,8 @@ No network or model loading: a fake guardrail stands in for the any-guardrail
 library object, and the Anthropic/Gemini fallback is monkeypatched.
 """
 
-import pytest
-
 import guardrails_runner as gr
+import pytest
 from guardrails_runner import AnyLlmAdapter, FlowJudgeAdapter, GliderAdapter, create_guardrail
 
 
@@ -44,33 +43,38 @@ def test_create_guardrail_glider_requires_criteria():
         create_guardrail("glider")
 
 
-def test_anyllm_adapter_openai_path_derives_valid_from_score():
-    fake = _FakeGuardrail(score=0.82)
-    judgment = AnyLlmAdapter(fake).evaluate(
-        eval_text="t", policy_text="p", assistant_response="r", model_id="openai:gpt-5-nano"
-    )
-    assert judgment.score == 0.82
-    assert judgment.valid is True
-    assert judgment.overall_verdict == "PASS"
-    assert fake.calls  # the library path was used (not the fallback)
-
-
-def test_anyllm_adapter_routes_anthropic_to_fallback(monkeypatch):
-    sentinel = gr.NonAgenticJudgment(valid=False, score=0.3, explanation="fallback")
+@pytest.mark.parametrize(
+    "model_id",
+    ["openai:gpt-5-nano", "anthropic:claude-sonnet-4-6", "gemini:gemini-2.5-flash"],
+)
+def test_anyllm_adapter_routes_every_provider_to_generative_judge(monkeypatch, model_id):
+    # PR-5: the library's AnyLlm.validate() coerces score to int, so all providers
+    # now go through the repo's prompt-based generative judge (float scores).
+    sentinel = gr.NonAgenticJudgment(valid=True, score=0.72, explanation="judged")
     captured = {}
 
-    def fake_fallback(*, model_id, policy_text, eval_text):
+    def fake_judge(*, model_id, policy_text, eval_text):
         captured["model_id"] = model_id
         return sentinel
 
-    monkeypatch.setattr(gr, "_run_nonagentic_fallback", fake_fallback)
-    fake = _FakeGuardrail(score=0.9)  # must NOT be consulted
-    judgment = AnyLlmAdapter(fake).evaluate(
-        eval_text="t", policy_text="p", assistant_response="r", model_id="anthropic:claude-sonnet-4-6"
-    )
+    monkeypatch.setattr(gr, "_run_nonagentic_fallback", fake_judge)
+    fake = _FakeGuardrail(score=0.9)  # the library object must NOT be consulted
+    judgment = AnyLlmAdapter(fake).evaluate(eval_text="t", policy_text="p", assistant_response="r", model_id=model_id)
     assert judgment is sentinel
-    assert captured["model_id"] == "anthropic:claude-sonnet-4-6"
-    assert not fake.calls  # fallback used; library never called
+    assert captured["model_id"] == model_id
+    assert not fake.calls  # library validate() is never called
+
+
+def test_anyllm_adapter_defaults_model_when_unspecified(monkeypatch):
+    captured = {}
+
+    def fake_judge(*, model_id, policy_text, eval_text):
+        captured["model_id"] = model_id
+        return gr.NonAgenticJudgment(valid=None, score=None, explanation="")
+
+    monkeypatch.setattr(gr, "_run_nonagentic_fallback", fake_judge)
+    AnyLlmAdapter(_FakeGuardrail(score=0.5)).evaluate(eval_text="t", policy_text="p", assistant_response="r")
+    assert captured["model_id"] == gr._DEFAULT_GENERATIVE_JUDGE_MODEL
 
 
 def test_glider_and_flowjudge_adapters_wrap_score():

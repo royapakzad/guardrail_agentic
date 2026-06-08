@@ -25,6 +25,10 @@ from any_guardrail import AnyGuardrail, GuardrailName
 # Applied uniformly across all backends after normalizing to a 0–1 scale.
 NONAGENTIC_VALID_THRESHOLD = 0.6
 
+# Default judge model for the generative ("anyllm") backend when the caller does
+# not specify one. Matches any-guardrail's historical AnyLlm default.
+_DEFAULT_GENERATIVE_JUDGE_MODEL = "openai:gpt-5-nano"
+
 
 @dataclass
 class NonAgenticJudgment:
@@ -368,33 +372,22 @@ class AnyLlmAdapter:
         assistant_response: str,
         model_id: str | None = None,
     ) -> NonAgenticJudgment:
-        # Anthropic and Gemini reject the library's hardcoded response_format /
-        # additionalProperties schema; route them to the prompt-based fallback.
-        provider_key = ""
-        if model_id:
-            if ":" in model_id:
-                provider_key = model_id.split(":", 1)[0].lower()
-            elif "/" in model_id:
-                provider_key = model_id.split("/", 1)[0].lower()
-        if model_id and provider_key in _NONAGENTIC_PROMPT_FALLBACK_PROVIDERS:
-            return _run_nonagentic_fallback(model_id=model_id, policy_text=policy_text, eval_text=eval_text)
-
-        validate_kwargs: dict = {}
-        if model_id:
-            validate_kwargs["model_id"] = model_id
-        raw = self._guardrail.validate(eval_text, policy_text, **validate_kwargs)
-
-        score = float(raw.score) if raw.score is not None else None
-        valid = (score > NONAGENTIC_VALID_THRESHOLD) if score is not None else None
-        s = score if score is not None else 0.0
-        overall = "PASS" if s > 0.70 else ("FAIL" if s <= 0.55 else "BORDERLINE")
-        conf = "HIGH" if (s < 0.40 or s > 0.80) else ("MEDIUM" if (s < 0.55 or s > 0.70) else "LOW")
-        return NonAgenticJudgment(
-            valid=valid,
-            score=score,
-            explanation=str(raw.explanation or ""),
-            overall_verdict=overall,
-            confidence=conf,
+        # any-guardrail 0.5.x's AnyLlm coerces the score to an int (0/1) via its
+        # internal GuardrailOutputAnyLLM model — destroying the continuous,
+        # deduction-based score this toolkit's whole metric (score_delta) depends
+        # on. So we no longer call the library's validate(); every provider goes
+        # through the repo's own prompt-based generative judge, which returns a
+        # float score plus the richer criteria/claims fields used for two-stage
+        # agentic targeting. This also unifies the OpenAI path with the
+        # Anthropic/Gemini path, which already used this code.
+        #
+        # NOTE: this changes OpenAI's effective scoring prompt versus the old
+        # any-guardrail 0.2.2 library path (which wrapped eval_text in the
+        # library's generic system prompt). Re-baseline OpenAI runs accordingly.
+        return _run_nonagentic_fallback(
+            model_id=model_id or _DEFAULT_GENERATIVE_JUDGE_MODEL,
+            policy_text=policy_text,
+            eval_text=eval_text,
         )
 
 

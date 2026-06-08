@@ -9,9 +9,9 @@ dependencies = [
     "streamlit>=1.35.0",            # interactive results dashboard (visualize_results.py)
     "pandas>=2.0.0",                # tables in the dashboard
     # Guardrail + LLM interface
-    "any-guardrail[flowjudge,huggingface]==0.2.2",
-    "any-llm-sdk[openai,anthropic,gemini,mistral]<1",  # any-guardrail 0.2.2 requires any-llm-sdk<1
-                                                       # (extra is `gemini`, not `google`; pulls google-genai)
+    "any-guardrail[flowjudge,huggingface]==0.5.1",
+    "any-llm-sdk[openai,anthropic,gemini,mistral]>=1.7.0",  # any-guardrail 0.5.1 requires any-llm-sdk>=1.7.0
+                                                            # (extra is `gemini`, not `google`; pulls google-genai)
     "python-dotenv==1.2.1",
     # Numerical / scientific
     "numpy==2.2.6",
