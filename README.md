@@ -236,7 +236,6 @@ multilingual_llm_guardrails-main/
 │   │                                 #   non-agentic eval, each tool call, final verdict,
 │   │                                 #   and comparison summary
 │   │
-│   └── requirements_agentic.txt      # Additional packages for Part B
 │
 ├── config/                           # All evaluation parameters — edit without touching code
 │   ├── assistant_system_prompt.txt   # System prompt for the assistant LLM
@@ -259,7 +258,9 @@ multilingual_llm_guardrails-main/
 │       ├── scenario_<id>_<ts>.txt    # Human-readable step trace
 │       └── scenario_<id>_<ts>.json  # Machine-readable full log
 ├── visualize_results.py              # Streamlit dashboard for exploring results
-├── requirements.txt                  # Python dependencies
+├── pyproject.toml                    # Project + dependencies (managed by uv)
+├── uv.lock                           # Pinned dependency lockfile (committed)
+├── .python-version                   # Python version pin used by uv
 ├── .env                              # API keys — never commit this file
 └── .gitignore
 ```
@@ -289,28 +290,31 @@ The key property across all domains is that accurate, safe, and empathetic respo
 
 ### Requirements
 
-- Python 3.12
+- [uv](https://docs.astral.sh/uv/) (manages the Python version and dependencies)
+- Python 3.12 (installed automatically by uv from `.python-version`)
 - API key for at least one of: OpenAI, Anthropic, Gemini, Mistral
 
 ### Install
 
+This project uses [`uv`](https://docs.astral.sh/uv/) for environment and dependency
+management (the lockfile `uv.lock` pins exact versions for reproducibility).
+
 ```bash
-# Create and activate a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate        # macOS/Linux
-
 # Install base dependencies (needed for Part A and Part B)
-pip install --upgrade pip
-pip install -r requirements.txt
+uv sync
 
-# Install the additional packages needed for Part B
-pip install -r agentic_guardrails/requirements_agentic.txt
+# Add the retrieval-tool dependencies needed for the agentic path (Part B)
+uv sync --extra agentic
 ```
 
-The additional packages in `requirements_agentic.txt` are:
+`uv` creates and manages a `.venv/` automatically; run commands with `uv run`,
+e.g. `uv run python agentic_guardrails/run_agentic_comparison.py --help`.
+
+The optional `agentic` dependency group provides:
 - `ddgs` — DuckDuckGo web search (no API key required), used by `search_web()`
 - `requests` — HTTP client used by `fetch_url()` and `check_url_validity()`
 - `beautifulsoup4` — HTML parser used by `fetch_url()` to extract readable text
+- `tavily-python` — Tavily backend (managed search + extract API)
 - `tiktoken` — OpenAI's tokenizer, used to count non-agentic guardrail tokens exactly
 
 ### API Keys
@@ -733,10 +737,11 @@ Bug entries are listed in order of discovery.
 
 **`duckduckgo_search` package renamed**
 
-If you see `RuntimeWarning: This package has been renamed to ddgs`, run:
+If you see `RuntimeWarning: This package has been renamed to ddgs`, ensure the
+`agentic` extra is installed:
 
 ```bash
-pip install ddgs
+uv sync --extra agentic
 ```
 
 The code in `agentic_guardrails/tools.py` tries `ddgs` first and falls back to `duckduckgo_search` automatically. Installing `ddgs` silences the warning.
@@ -760,13 +765,8 @@ Produced internally by the `any_guardrail` library. Not from this project's code
 **Virtual environment errors (`Invalid version`, `invalid-installed-package`)**
 
 ```bash
-deactivate 2>/dev/null || true
 rm -rf .venv
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-pip install -r agentic_guardrails/requirements_agentic.txt
+uv sync --extra agentic
 ```
 
 ---
