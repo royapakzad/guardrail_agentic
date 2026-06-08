@@ -374,7 +374,7 @@ def process_row(
             "model": assistant_model,
             "assistant_system_prompt": assistant_system_prompt,
             "assistant_response": assistant_response,
-            "guardrail_backend": type(guardrail).__name__,
+            "guardrail_backend": guardrail.backend_name,
             "guardrail_judges": [j.model_id for j in judges],
             "max_tool_calls_allowed": max_tool_calls,
             "web_search_tool": web_search_tool,

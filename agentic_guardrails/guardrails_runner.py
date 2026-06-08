@@ -7,9 +7,9 @@ fully self-contained without importing from the parent script.
 
 Exports:
     load_text_file(path, *, default="") -> str
-    create_guardrail(name_str, **kwargs)  -> AnyGuardrail
+    create_guardrail(name_str, **kwargs)  -> GuardrailAdapter
     build_guardrail_input_text(...)       -> str
-    run_guardrail_for_policy(...)         -> GuardrailOutput
+    run_guardrail_for_policy(...)         -> NonAgenticJudgment
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from any_guardrail import AnyGuardrail, GuardrailName
 
@@ -323,6 +324,120 @@ def _run_nonagentic_fallback(
     return NonAgenticJudgment(valid=None, score=None, explanation=text.strip())
 
 
+# ── Backend adapters ──────────────────────────────────────────────────────────
+# Each any-guardrail backend exposes a *different* validate() signature. Rather
+# than matching on class names at the call site (fragile), wrap each backend in an
+# adapter that presents one uniform evaluate() -> NonAgenticJudgment interface.
+
+
+class GuardrailAdapter(Protocol):
+    """Uniform interface over the non-agentic guardrail backends."""
+
+    backend_name: str
+
+    def evaluate(
+        self,
+        *,
+        eval_text: str,
+        policy_text: str,
+        assistant_response: str,
+        model_id: str | None = None,
+    ) -> NonAgenticJudgment: ...
+
+
+def _judgment_from_score(score_raw: object, explanation: object) -> NonAgenticJudgment:
+    """Wrap a backend's raw score/explanation, deriving `valid` from the shared threshold."""
+    score = float(score_raw) if score_raw is not None else None  # type: ignore[arg-type]
+    valid = (score > NONAGENTIC_VALID_THRESHOLD) if score is not None else None
+    return NonAgenticJudgment(valid=valid, score=score, explanation=str(explanation or ""))
+
+
+class AnyLlmAdapter:
+    """Generative `any-llm` judge — validate(input_text, policy, model_id=...)."""
+
+    backend_name = "anyllm"
+
+    def __init__(self, guardrail: AnyGuardrail) -> None:
+        self._guardrail = guardrail
+
+    def evaluate(
+        self,
+        *,
+        eval_text: str,
+        policy_text: str,
+        assistant_response: str,
+        model_id: str | None = None,
+    ) -> NonAgenticJudgment:
+        # Anthropic and Gemini reject the library's hardcoded response_format /
+        # additionalProperties schema; route them to the prompt-based fallback.
+        provider_key = ""
+        if model_id:
+            if ":" in model_id:
+                provider_key = model_id.split(":", 1)[0].lower()
+            elif "/" in model_id:
+                provider_key = model_id.split("/", 1)[0].lower()
+        if model_id and provider_key in _NONAGENTIC_PROMPT_FALLBACK_PROVIDERS:
+            return _run_nonagentic_fallback(model_id=model_id, policy_text=policy_text, eval_text=eval_text)
+
+        validate_kwargs: dict = {}
+        if model_id:
+            validate_kwargs["model_id"] = model_id
+        raw = self._guardrail.validate(eval_text, policy_text, **validate_kwargs)
+
+        score = float(raw.score) if raw.score is not None else None
+        valid = (score > NONAGENTIC_VALID_THRESHOLD) if score is not None else None
+        s = score if score is not None else 0.0
+        overall = "PASS" if s > 0.70 else ("FAIL" if s <= 0.55 else "BORDERLINE")
+        conf = "HIGH" if (s < 0.40 or s > 0.80) else ("MEDIUM" if (s < 0.55 or s > 0.70) else "LOW")
+        return NonAgenticJudgment(
+            valid=valid,
+            score=score,
+            explanation=str(raw.explanation or ""),
+            overall_verdict=overall,
+            confidence=conf,
+        )
+
+
+class GliderAdapter:
+    """Glider judge — validate(input_text=...)."""
+
+    backend_name = "glider"
+
+    def __init__(self, guardrail: AnyGuardrail) -> None:
+        self._guardrail = guardrail
+
+    def evaluate(
+        self,
+        *,
+        eval_text: str,
+        policy_text: str,
+        assistant_response: str,
+        model_id: str | None = None,
+    ) -> NonAgenticJudgment:
+        raw = self._guardrail.validate(input_text=eval_text)
+        return _judgment_from_score(raw.score, raw.explanation)
+
+
+class FlowJudgeAdapter:
+    """FlowJudge judge — validate(inputs=[{query}], output={response})."""
+
+    backend_name = "flowjudge"
+
+    def __init__(self, guardrail: AnyGuardrail) -> None:
+        self._guardrail = guardrail
+
+    def evaluate(
+        self,
+        *,
+        eval_text: str,
+        policy_text: str,
+        assistant_response: str,
+        model_id: str | None = None,
+    ) -> NonAgenticJudgment:
+        raw = self._guardrail.validate(inputs=[{"query": eval_text}], output={"response": assistant_response})
+        return _judgment_from_score(raw.score, raw.explanation)
+
+
 VALID_GUARDRAILS = {
     "flowjudge": GuardrailName.FLOWJUDGE,
     "glider": GuardrailName.GLIDER,
@@ -345,9 +460,9 @@ def create_guardrail(
     glider_rubric: str | None = None,
     flowjudge_metric_name: str = "policy_compliance",
     flowjudge_criteria: str | None = None,
-) -> AnyGuardrail:
+) -> GuardrailAdapter:
     """
-    Create a guardrail from a short name: flowjudge | glider | anyllm.
+    Create a guardrail adapter from a short name: flowjudge | glider | anyllm.
     """
     key = name_str.lower()
     if key not in VALID_GUARDRAILS:
@@ -371,13 +486,15 @@ def create_guardrail(
         }
         required_inputs = ["query"]
         required_output = "response"
-        return AnyGuardrail.create(
-            VALID_GUARDRAILS[key],
-            name=metric_name,
-            criteria=criteria,
-            rubric=flowjudge_rubric,
-            required_inputs=required_inputs,
-            required_output=required_output,
+        return FlowJudgeAdapter(
+            AnyGuardrail.create(
+                VALID_GUARDRAILS[key],
+                name=metric_name,
+                criteria=criteria,
+                rubric=flowjudge_rubric,
+                required_inputs=required_inputs,
+                required_output=required_output,
+            )
         )
 
     if key == "glider":
@@ -390,13 +507,15 @@ def create_guardrail(
                 "Glider guardrail selected, but no Glider rubric provided. "
                 "Set --glider-rubric-file or reuse --rubric-file."
             )
-        return AnyGuardrail.create(
-            VALID_GUARDRAILS[key],
-            pass_criteria=glider_pass_criteria,
-            rubric=glider_rubric,
+        return GliderAdapter(
+            AnyGuardrail.create(
+                VALID_GUARDRAILS[key],
+                pass_criteria=glider_pass_criteria,
+                rubric=glider_rubric,
+            )
         )
 
-    return AnyGuardrail.create(VALID_GUARDRAILS[key])
+    return AnyLlmAdapter(AnyGuardrail.create(VALID_GUARDRAILS[key]))
 
 
 def build_guardrail_input_text(
@@ -462,7 +581,7 @@ def build_guardrail_input_text(
 
 def run_guardrail_for_policy(
     *,
-    guardrail: AnyGuardrail,
+    guardrail: GuardrailAdapter,
     policy_text: str,
     rubric: str,
     system_prompt: str,
@@ -472,10 +591,11 @@ def run_guardrail_for_policy(
 ) -> NonAgenticJudgment:
     """
     Run the chosen guardrail backend for a single (response, policy) pair.
-    Returns a NonAgenticJudgment with categorical verdicts, improvements,
-    and claims_to_verify (used for two-stage agentic targeting).
+
+    Builds the shared evaluation text and delegates to the backend adapter's
+    uniform evaluate() interface (see create_guardrail). Returns a
+    NonAgenticJudgment with categorical verdicts where the backend provides them.
     """
-    # Build the single evaluation text that all three backends will receive.
     eval_text = build_guardrail_input_text(
         policy=policy_text,
         rubric=rubric,
@@ -483,63 +603,9 @@ def run_guardrail_for_policy(
         user_message=user_message,
         assistant_response=assistant_response,
     )
-
-    # Detect the active backend by inspecting the class name and optional
-    # .name attribute. This avoids importing each backend class directly.
-    backend_name = guardrail.__class__.__name__.lower()
-    backend_name_attr = getattr(guardrail, "name", "").lower()
-
-    # AnyLLM: validate(input_text, policy_text, model_id=...)
-    # model_id is passed through so the caller controls which LLM judges.
-    # Override valid using a strict > 0.6 threshold so the LLM's self-reported
-    # valid flag is never used — score alone determines the outcome.
-    if "anyllm" in backend_name or "anyllm" in backend_name_attr:
-        # Detect provider from "provider:model" or "provider/model".
-        # Anthropic and Gemini reject the library's hardcoded response_format /
-        # additionalProperties schema; route them to the prompt-based fallback.
-        _provider_key = ""
-        if model_id:
-            if ":" in model_id:
-                _provider_key = model_id.split(":", 1)[0].lower()
-            elif "/" in model_id:
-                _provider_key = model_id.split("/", 1)[0].lower()
-
-        if model_id and _provider_key in _NONAGENTIC_PROMPT_FALLBACK_PROVIDERS:
-            return _run_nonagentic_fallback(
-                model_id=model_id,
-                policy_text=policy_text,
-                eval_text=eval_text,
-            )
-
-        validate_kwargs: dict = {}
-        if model_id:
-            validate_kwargs["model_id"] = model_id
-        raw = guardrail.validate(eval_text, policy_text, **validate_kwargs)
-        score = raw.score
-        if score is not None:
-            score = float(score)
-            valid = score > NONAGENTIC_VALID_THRESHOLD
-        else:
-            valid = None
-        s = float(score) if score is not None else 0.0
-        overall = "PASS" if s > 0.70 else ("FAIL" if s <= 0.55 else "BORDERLINE")
-        conf = "HIGH" if (s < 0.40 or s > 0.80) else ("MEDIUM" if (s < 0.55 or s > 0.70) else "LOW")
-        return NonAgenticJudgment(
-            valid=valid,
-            score=score,
-            explanation=str(raw.explanation or ""),
-            overall_verdict=overall,
-            confidence=conf,
-        )
-
-    # Glider and FlowJudge: wrap raw output in NonAgenticJudgment for consistency
-    if "glider" in backend_name or "glider" in backend_name_attr:
-        raw = guardrail.validate(input_text=eval_text)
-    elif "flowjudge" in backend_name or "flowjudge" in backend_name_attr:
-        raw = guardrail.validate(inputs=[{"query": eval_text}], output={"response": assistant_response})
-    else:
-        raw = guardrail.validate(input=eval_text)
-
-    score = float(raw.score) if raw.score is not None else None
-    valid = (score > NONAGENTIC_VALID_THRESHOLD) if score is not None else None
-    return NonAgenticJudgment(valid=valid, score=score, explanation=str(raw.explanation or ""))
+    return guardrail.evaluate(
+        eval_text=eval_text,
+        policy_text=policy_text,
+        assistant_response=assistant_response,
+        model_id=model_id,
+    )
