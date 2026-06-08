@@ -244,6 +244,7 @@ def _run_generative_judge(
         eval_text:   The assembled evaluation prompt (policy + rubric + conversation).
     """
     from any_llm import completion as _llm_completion
+    from llm_gateway import resolve_completion_kwargs
 
     # Split "provider:model" or "provider/model".
     if ":" in model_id:
@@ -254,8 +255,7 @@ def _run_generative_judge(
         llm_provider, llm_model = "openai", model_id
 
     resp = _llm_completion(
-        provider=llm_provider.lower(),
-        model=llm_model,
+        **resolve_completion_kwargs(provider=llm_provider.lower(), model=llm_model),
         messages=[
             {
                 "role": "system",

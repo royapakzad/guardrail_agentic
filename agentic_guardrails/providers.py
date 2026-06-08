@@ -22,6 +22,7 @@ Install:
 from __future__ import annotations
 
 from any_llm import completion as _completion
+from llm_gateway import resolve_completion_kwargs
 
 SUPPORTED_PROVIDERS = (
     "openai",
@@ -57,8 +58,7 @@ def call_llm(
                        any explicit temperature value and require the default.
     """
     kwargs: dict = {
-        "provider": provider.lower(),
-        "model": model,
+        **resolve_completion_kwargs(provider=provider.lower(), model=model),
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},

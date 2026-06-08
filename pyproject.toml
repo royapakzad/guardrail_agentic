@@ -43,6 +43,12 @@ dev = [
     "types-requests",
     "types-beautifulsoup4",
 ]
+# Route LLM calls through the Otari gateway (mozilla-ai/otari). Only needed when
+# LLM_GATEWAY=otari; direct-provider mode requires nothing here.
+# Install with: uv sync --extra otari
+otari = [
+    "otari>=0.0.3",
+]
 
 # This is a flat-layout research toolkit run as scripts (modules import each other
 # by bare name via sys.path), not an installable library — so uv manages the

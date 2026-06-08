@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING
 
 from any_llm import completion as _completion
 from guardrails_runner import SHARED_SEVERITY_ANCHORS
+from llm_gateway import resolve_completion_kwargs
 from tools import TOOL_SCHEMAS, check_acronym, check_url_validity, dispatch_tool_call
 
 if TYPE_CHECKING:
@@ -885,9 +886,10 @@ def run_agentic_guardrail(
             if verbose:
                 print("      [cap reached — injecting conclusion prompt]")
 
+        # Route through the gateway resolver (direct provider by default; Otari when
+        # configured). parallel_tool_calls below still keys off the *real* provider.
         call_kwargs: dict = {
-            "provider": provider.lower(),
-            "model": guardrail_model,
+            **resolve_completion_kwargs(provider=provider.lower(), model=guardrail_model),
             "messages": messages,
         }
         if tool_choice != "none":
@@ -939,8 +941,7 @@ def run_agentic_guardrail(
                 messages.append({"role": "assistant", "content": final_text})
                 messages.append(dict(_RETRY_MESSAGE))
                 retry_kwargs: dict = {
-                    "provider": provider.lower(),
-                    "model": guardrail_model,
+                    **resolve_completion_kwargs(provider=provider.lower(), model=guardrail_model),
                     "messages": messages,
                 }
                 try:
