@@ -3,10 +3,10 @@ comparison.py
 -------------
 Computes the delta between the non-agentic and agentic guardrail judgments.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from agentic_runner import AgenticJudgment
 
@@ -17,11 +17,11 @@ class ComparisonResult:
     # Positive → agentic scored the response higher (more compliant).
     # Negative → agentic scored the response lower (less compliant).
     # None if either score is missing.
-    score_delta: Optional[float]
+    score_delta: float | None
 
     # True if the valid flag flipped between the two paths.
     # None if either valid value is missing.
-    judgment_changed: Optional[bool]
+    judgment_changed: bool | None
 
     # True if the agentic path actually invoked at least one tool.
     agentic_used_tools: bool
@@ -32,8 +32,8 @@ class ComparisonResult:
 
 def compare_judgments(
     *,
-    nonagentic_valid: Optional[bool],
-    nonagentic_score: Optional[float],
+    nonagentic_valid: bool | None,
+    nonagentic_score: float | None,
     agentic_judgment: AgenticJudgment,
 ) -> ComparisonResult:
     """
@@ -50,16 +50,14 @@ def compare_judgments(
     #             (e.g. found a broken URL or contradicted a factual claim)
     # None      → at least one path failed to produce a numeric score
     if nonagentic_score is not None and agentic_judgment.score is not None:
-        score_delta: Optional[float] = round(
-            agentic_judgment.score - nonagentic_score, 4
-        )
+        score_delta: float | None = round(agentic_judgment.score - nonagentic_score, 4)
     else:
         score_delta = None
 
     # judgment_changed: did the binary pass/fail decision flip between paths?
     # True = the strongest possible signal that retrieval changed the outcome.
     if nonagentic_valid is not None and agentic_judgment.valid is not None:
-        judgment_changed: Optional[bool] = agentic_judgment.valid != nonagentic_valid
+        judgment_changed: bool | None = agentic_judgment.valid != nonagentic_valid
     else:
         judgment_changed = None
 

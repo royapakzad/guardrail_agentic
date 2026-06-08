@@ -23,6 +23,7 @@ Exports:
   dispatch_tool_call(name, arguments_json) → str
   TOOL_SCHEMAS               — list of OpenAI-format tool schemas
 """
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -30,7 +31,6 @@ import importlib
 import json
 import os
 from typing import Any
-
 
 MAX_FETCH_CHARS = 4000
 MAX_SEARCH_RESULTS = 5
@@ -43,9 +43,9 @@ _TOOL_TIMEOUT_S = 60
 _SEARXNG_DEFAULT_URL = "http://localhost:8080"
 
 BACKEND_DUCKDUCKGO = "duckduckgo"
-BACKEND_SEARXNG    = "searxng"
-BACKEND_TAVILY     = "tavily"
-VALID_BACKENDS     = frozenset({BACKEND_DUCKDUCKGO, BACKEND_SEARXNG, BACKEND_TAVILY})
+BACKEND_SEARXNG = "searxng"
+BACKEND_TAVILY = "tavily"
+VALID_BACKENDS = frozenset({BACKEND_DUCKDUCKGO, BACKEND_SEARXNG, BACKEND_TAVILY})
 
 # Module-level active backend — changed by set_search_backend().
 _active_backend: str = BACKEND_DUCKDUCKGO
@@ -57,15 +57,13 @@ class ToolError(RuntimeError):
 
 # ── Backend selection ─────────────────────────────────────────────────────────
 
+
 def set_search_backend(name: str) -> None:
     """Configure the search/fetch backend. Call once before starting evaluations."""
     global _active_backend
     name = name.lower().strip()
     if name not in VALID_BACKENDS:
-        raise ValueError(
-            f"Unknown search backend {name!r}. "
-            f"Valid choices: {', '.join(sorted(VALID_BACKENDS))}"
-        )
+        raise ValueError(f"Unknown search backend {name!r}. Valid choices: {', '.join(sorted(VALID_BACKENDS))}")
     _active_backend = name
 
 
@@ -75,6 +73,7 @@ def get_search_backend() -> str:
 
 
 # ── DuckDuckGo backend ────────────────────────────────────────────────────────
+
 
 def _search_duckduckgo(query: str, max_results: int) -> list[dict[str, str]]:
     DDGS = None
@@ -86,10 +85,7 @@ def _search_duckduckgo(query: str, max_results: int) -> list[dict[str, str]]:
         except ImportError:
             continue
     if DDGS is None:
-        raise ToolError(
-            "Neither 'ddgs' nor 'duckduckgo_search' is installed. "
-            "Run: pip install ddgs"
-        )
+        raise ToolError("Neither 'ddgs' nor 'duckduckgo_search' is installed. Run: pip install ddgs")
     try:
         with DDGS(timeout=20) as client:
             raw = list(client.text(query, max_results=max_results))
@@ -116,9 +112,7 @@ def _fetch_requests_bs4(url: str, max_chars: int) -> str:
         import requests
         from bs4 import BeautifulSoup
     except ImportError as exc:
-        raise ToolError(
-            f"Missing dependency: {exc}. Run: pip install requests beautifulsoup4"
-        ) from exc
+        raise ToolError(f"Missing dependency: {exc}. Run: pip install requests beautifulsoup4") from exc
     try:
         resp = requests.get(
             url,
@@ -139,13 +133,14 @@ def _fetch_requests_bs4(url: str, max_chars: int) -> str:
 
 # ── SearXNG backend ───────────────────────────────────────────────────────────
 
+
 def _search_searxng(query: str, max_results: int) -> list[dict[str, str]]:
     try:
         import requests
     except ImportError as exc:
         raise ToolError("'requests' is not installed. Run: pip install requests") from exc
     base_url = os.getenv("SEARXNG_BASE_URL", _SEARXNG_DEFAULT_URL).rstrip("/")
-    params = {"q": query, "format": "json", "language": "all", "safesearch": 0}
+    params: dict[str, str | int] = {"q": query, "format": "json", "language": "all", "safesearch": 0}
     try:
         resp = requests.get(
             f"{base_url}/search",
@@ -187,18 +182,16 @@ _fetch_searxng = _fetch_requests_bs4
 
 # ── Tavily backend ────────────────────────────────────────────────────────────
 
+
 def _tavily_client():
     try:
         from tavily import TavilyClient  # type: ignore
     except ImportError as exc:
-        raise ToolError(
-            "'tavily-python' is not installed. Run: pip install tavily-python"
-        ) from exc
+        raise ToolError("'tavily-python' is not installed. Run: pip install tavily-python") from exc
     api_key = os.getenv("TAVILY_API_KEY", "")
     if not api_key:
         raise ToolError(
-            "TAVILY_API_KEY environment variable is not set. "
-            "Add it to your .env file: TAVILY_API_KEY=tvly-..."
+            "TAVILY_API_KEY environment variable is not set. Add it to your .env file: TAVILY_API_KEY=tvly-..."
         )
     return TavilyClient(api_key=api_key)
 
@@ -246,6 +239,7 @@ def _fetch_tavily(url: str, max_chars: int) -> str:
 
 # ── Public search / fetch interface ──────────────────────────────────────────
 
+
 def search_web(query: str, max_results: int = MAX_SEARCH_RESULTS) -> list[dict[str, str]]:
     """Search the web using the configured backend. Returns [{title, url, snippet}, ...]."""
     if _active_backend == BACKEND_DUCKDUCKGO:
@@ -270,6 +264,7 @@ def fetch_url(url: str, max_chars: int = MAX_FETCH_CHARS) -> str:
 
 # ── check_url_validity (backend-independent) ─────────────────────────────────
 
+
 def check_url_validity(url: str) -> dict:
     """
     Check whether a URL is reachable. Same implementation for all backends.
@@ -288,21 +283,27 @@ def check_url_validity(url: str) -> dict:
     try:
         resp = requests.head(url, timeout=10, headers=headers, allow_redirects=True)
         if resp.status_code == 405:
-            resp = requests.get(
-                url, timeout=10, headers=headers, allow_redirects=True, stream=True
-            )
+            resp = requests.get(url, timeout=10, headers=headers, allow_redirects=True, stream=True)
             resp.close()
     except Exception as exc:
         return {
-            "url": url, "valid": False, "status_code": None,
-            "final_url": url, "redirect_count": 0, "error": str(exc),
+            "url": url,
+            "valid": False,
+            "status_code": None,
+            "final_url": url,
+            "redirect_count": 0,
+            "error": str(exc),
         }
 
     status = resp.status_code
     valid = status < 400 or status in (401, 403)
     return {
-        "url": url, "valid": valid, "status_code": status,
-        "final_url": resp.url, "redirect_count": len(resp.history), "error": None,
+        "url": url,
+        "valid": valid,
+        "status_code": status,
+        "final_url": resp.url,
+        "redirect_count": len(resp.history),
+        "error": None,
     }
 
 
@@ -310,11 +311,21 @@ def check_url_validity(url: str) -> dict:
 
 # BCP-47 → human-readable language name for search query context
 _LANG_NAMES: dict[str, str] = {
-    "fr": "French", "fa": "Persian Farsi", "de": "German",
-    "ar": "Arabic", "es": "Spanish",       "it": "Italian",
-    "nl": "Dutch",  "pt": "Portuguese",    "ru": "Russian",
-    "tr": "Turkish","zh": "Chinese",       "ja": "Japanese",
-    "ko": "Korean", "uk": "Ukrainian",     "pl": "Polish",
+    "fr": "French",
+    "fa": "Persian Farsi",
+    "de": "German",
+    "ar": "Arabic",
+    "es": "Spanish",
+    "it": "Italian",
+    "nl": "Dutch",
+    "pt": "Portuguese",
+    "ru": "Russian",
+    "tr": "Turkish",
+    "zh": "Chinese",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "uk": "Ukrainian",
+    "pl": "Polish",
 }
 
 
@@ -365,10 +376,7 @@ def check_acronym(
 
     # Heuristic: fraction of significant words in claimed_expansion found in search text
     claimed_words = [w.lower() for w in claimed_expansion.split() if len(w) > 2]
-    combined_text = " ".join(
-        (r.get("title", "") + " " + r.get("snippet", "")).lower()
-        for r in results
-    )
+    combined_text = " ".join((r.get("title", "") + " " + r.get("snippet", "")).lower() for r in results)
     if claimed_words:
         matched = sum(1 for w in claimed_words if w in combined_text)
         match_score = round(matched / len(claimed_words), 2)
@@ -398,6 +406,7 @@ def check_acronym(
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
+
 
 def dispatch_tool_call(name: str, arguments_json: str) -> str:
     """
@@ -438,12 +447,14 @@ def dispatch_tool_call(name: str, arguments_json: str) -> str:
         try:
             return future.result(timeout=_TOOL_TIMEOUT_S)
         except concurrent.futures.TimeoutError:
-            return json.dumps({
-                "error": (
-                    f"Tool '{name}' timed out after {_TOOL_TIMEOUT_S}s "
-                    f"(likely a network stall — result unavailable)."
-                )
-            })
+            return json.dumps(
+                {
+                    "error": (
+                        f"Tool '{name}' timed out after {_TOOL_TIMEOUT_S}s "
+                        f"(likely a network stall — result unavailable)."
+                    )
+                }
+            )
         except ToolError as exc:
             return json.dumps({"error": str(exc)})
 

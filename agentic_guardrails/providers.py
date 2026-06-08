@@ -18,6 +18,7 @@ Install:
   pip install 'any-llm-sdk[openai,anthropic,google,mistral]'
   pip install 'any-llm-sdk[all]'   # all providers
 """
+
 from __future__ import annotations
 
 from any_llm import completion as _completion
@@ -55,18 +56,19 @@ def call_llm(
                        default). Some models (e.g. gpt-5-mini, o-series) reject
                        any explicit temperature value and require the default.
     """
-    kwargs: dict = dict(
-        provider=provider.lower(),
-        model=model,
-        messages=[
+    kwargs: dict = {
+        "provider": provider.lower(),
+        "model": model,
+        "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ],
-    )
+    }
     # Only send temperature when explicitly set — models like gpt-5-mini and
     # the o-series reject temperature=0.0 and require the API default.
     if temperature is not None:
         kwargs["temperature"] = temperature
 
     resp = _completion(**kwargs)
-    return resp.choices[0].message.content or ""
+    # Non-streaming call always returns a ChatCompletion (not a chunk iterator).
+    return resp.choices[0].message.content or ""  # type: ignore[union-attr]

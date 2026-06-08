@@ -26,13 +26,14 @@ Usage (internal):
     logger.log_comparison(...)
     logger.finalize()                  # flushes JSON file; txt is written live
 """
+
 from __future__ import annotations
 
 import json
 import os
 import re
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 # Width for separator lines in the text log
 _W = 100
@@ -48,7 +49,7 @@ def _slug(text: str) -> str:
 def _box(heading: str, body: str, indent: int = 2) -> str:
     """Return a formatted box block as a string."""
     pad = " " * indent
-    top = f"{'─'*4} {heading} {'─'*(_W - 6 - len(heading))}"
+    top = f"{'─' * 4} {heading} {'─' * (_W - 6 - len(heading))}"
     lines = [top]
     for raw_line in body.splitlines():
         lines.append(pad + raw_line if raw_line.strip() else "")
@@ -57,7 +58,6 @@ def _box(heading: str, body: str, indent: int = 2) -> str:
 
 
 def _section(title: str) -> str:
-    eq = "═" * _W
     side = (_W - len(title) - 2) // 2
     header = "═" * side + " " + title + " " + "═" * (_W - side - len(title) - 2)
     return f"\n{header}\n"
@@ -103,10 +103,10 @@ class ScenarioLogger:
 
         # Write the file header once
         self._write(
-            f"{'╔' + '═'*(_W-2) + '╗'}\n"
-            f"{'║'} {'AGENTIC GUARDRAIL SCENARIO LOG':^{_W-4}} {'║'}\n"
-            f"{'║'} {f'Scenario ID: {scenario_id}  |  Language: {language}  |  {timestamp}':^{_W-4}} {'║'}\n"
-            f"{'╚' + '═'*(_W-2) + '╝'}\n"
+            f"{'╔' + '═' * (_W - 2) + '╗'}\n"
+            f"{'║'} {'AGENTIC GUARDRAIL SCENARIO LOG':^{_W - 4}} {'║'}\n"
+            f"{'║'} {f'Scenario ID: {scenario_id}  |  Language: {language}  |  {timestamp}':^{_W - 4}} {'║'}\n"
+            f"{'╚' + '═' * (_W - 2) + '╝'}\n"
         )
         self._write(_box("SCENARIO INPUT", scenario_text))
 
@@ -151,12 +151,12 @@ class ScenarioLogger:
         policy_text: str,
         rubric: str,
         eval_input_text: str,
-        valid: Optional[bool],
-        score: Optional[float],
+        valid: bool | None,
+        score: float | None,
         explanation: str,
-        prompt_tokens: Optional[int] = None,
-        completion_tokens: Optional[int] = None,
-        total_tokens: Optional[int] = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        total_tokens: int | None = None,
     ) -> None:
         """Log one non-agentic guardrail evaluation pass."""
         key = f"policy_{policy_label}"
@@ -176,11 +176,7 @@ class ScenarioLogger:
 
         self._write(_section(f"STEP 2A — NON-AGENTIC GUARDRAIL  [policy: {policy_label}]"))
         self._write(_box("FULL TEXT SENT TO NON-AGENTIC GUARDRAIL", eval_input_text))
-        self._write(
-            f"  Output:\n"
-            f"    valid       : {valid}\n"
-            f"    score       : {score}\n"
-        )
+        self._write(f"  Output:\n    valid       : {valid}\n    score       : {score}\n")
         if prompt_tokens is not None:
             self._write(
                 f"  Token usage (tiktoken — same tokenizer the model uses):\n"
@@ -267,17 +263,17 @@ class ScenarioLogger:
         self,
         *,
         raw_final_message: str,
-        valid: Optional[bool],
-        score: Optional[float],
+        valid: bool | None,
+        score: float | None,
         explanation: str,
         tool_calls_made: int,
         sources_used: list,
         url_checks: list,
-        prompt_tokens_total: Optional[int] = None,
-        completion_tokens_total: Optional[int] = None,
-        total_tokens_used: Optional[int] = None,
-        peak_prompt_tokens: Optional[int] = None,
-        token_usage_per_turn: Optional[list] = None,
+        prompt_tokens_total: int | None = None,
+        completion_tokens_total: int | None = None,
+        total_tokens_used: int | None = None,
+        peak_prompt_tokens: int | None = None,
+        token_usage_per_turn: list | None = None,
     ) -> None:
         """Log the agentic guardrail's final reasoning and parsed verdict."""
         agentic = self._data.get(self._current_policy_key, {}).get("agentic")
@@ -310,15 +306,19 @@ class ScenarioLogger:
 
         # Token usage summary
         if prompt_tokens_total is not None or completion_tokens_total is not None:
-            self._write(f"  Token usage (exact — from provider API, summed across all {len(token_usage_per_turn or [])} turns):\n")
+            self._write(
+                f"  Token usage (exact — from provider API, summed across all {len(token_usage_per_turn or [])} turns):\n"
+            )
             self._write(f"    prompt tokens (input read)   : {(prompt_tokens_total or 0):,}")
             self._write(f"    completion tokens (generated): {(completion_tokens_total or 0):,}")
             self._write(f"    total tokens                 : {(total_tokens_used or 0):,}")
-            self._write(f"    peak prompt tokens (any turn): {(peak_prompt_tokens or 0):,}  ← context window high-water mark")
+            self._write(
+                f"    peak prompt tokens (any turn): {(peak_prompt_tokens or 0):,}  ← context window high-water mark"
+            )
             if token_usage_per_turn:
-                self._write(f"\n  Per-turn token breakdown:")
+                self._write("\n  Per-turn token breakdown:")
                 self._write(f"    {'Turn':>4}  {'Prompt':>8}  {'Completion':>10}  {'Total':>8}  Tool calls?")
-                self._write(f"    {'─'*4}  {'─'*8}  {'─'*10}  {'─'*8}  {'─'*10}")
+                self._write(f"    {'─' * 4}  {'─' * 8}  {'─' * 10}  {'─' * 8}  {'─' * 10}")
                 for t in token_usage_per_turn:
                     has_tc = "yes" if t.get("has_tool_calls") else "no"
                     self._write(
@@ -340,8 +340,8 @@ class ScenarioLogger:
             for uc in url_checks:
                 icon = "✓" if uc.get("valid") else "✗"
                 self._write(
-                    f"    {icon} {uc.get('url','')}  →  "
-                    f"HTTP {uc.get('status_code','?')}  "
+                    f"    {icon} {uc.get('url', '')}  →  "
+                    f"HTTP {uc.get('status_code', '?')}  "
                     f"valid={uc.get('valid')}  "
                     f"redirects={uc.get('redirect_count', 0)}"
                 )
@@ -355,12 +355,12 @@ class ScenarioLogger:
         self,
         *,
         policy_label: str,
-        nonagentic_valid: Optional[bool],
-        nonagentic_score: Optional[float],
-        agentic_valid: Optional[bool],
-        agentic_score: Optional[float],
-        score_delta: Optional[float],
-        judgment_changed: Optional[bool],
+        nonagentic_valid: bool | None,
+        nonagentic_score: float | None,
+        agentic_valid: bool | None,
+        agentic_score: float | None,
+        score_delta: float | None,
+        judgment_changed: bool | None,
         agentic_used_tools: bool,
     ) -> None:
         """Log the side-by-side comparison between the two paths."""

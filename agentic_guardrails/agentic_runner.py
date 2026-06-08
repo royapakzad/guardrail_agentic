@@ -27,6 +27,7 @@ Exports:
     AgenticJudgment          – result dataclass
     run_agentic_guardrail()  – main entry point
 """
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -35,12 +36,11 @@ import re
 import time
 import warnings
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from any_llm import completion as _completion
-
-from tools import TOOL_SCHEMAS, dispatch_tool_call, check_url_validity, check_acronym
 from guardrails_runner import SHARED_SEVERITY_ANCHORS
+from tools import TOOL_SCHEMAS, check_acronym, check_url_validity, dispatch_tool_call
 
 if TYPE_CHECKING:
     from scenario_logger import ScenarioLogger
@@ -63,7 +63,7 @@ def _completion_with_retry(**kwargs):
                 raise
             msg = str(exc).lower()
             if "429" in msg or "rate_limit" in msg or "rate limit" in msg:
-                wait_s = _RATE_LIMIT_BASE_WAIT_S * (2 ** attempt)
+                wait_s = _RATE_LIMIT_BASE_WAIT_S * (2**attempt)
                 warnings.warn(
                     f"[agentic_runner] Rate-limit hit (attempt {attempt + 1}/"
                     f"{_RATE_LIMIT_MAX_RETRIES}); retrying in {wait_s}s.",
@@ -84,7 +84,8 @@ def _sanitize_tool_id(tool_id: str) -> str:
 
 # ── Pre-run URL checks ────────────────────────────────────────────────────────
 
-_URL_EXTRACT_RE = re.compile(r'https?://\S+', re.IGNORECASE)
+_URL_EXTRACT_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+
 
 def _prerun_url_checks_parallel(assistant_response: str) -> tuple[list[dict], str]:
     """
@@ -103,7 +104,7 @@ def _prerun_url_checks_parallel(assistant_response: str) -> tuple[list[dict], st
     urls: list[str] = []
     seen: set[str] = set()
     for m in _URL_EXTRACT_RE.finditer(assistant_response):
-        url = m.group(0).rstrip('.,;:!?)]\'"<>')
+        url = m.group(0).rstrip(".,;:!?)]'\"<>")
         if url and url not in seen:
             urls.append(url)
             seen.add(url)
@@ -120,8 +121,12 @@ def _prerun_url_checks_parallel(assistant_response: str) -> tuple[list[dict], st
                 results[url] = future.result()
             except Exception as exc:
                 results[url] = {
-                    "url": url, "valid": False, "status_code": None,
-                    "final_url": url, "redirect_count": 0, "error": str(exc),
+                    "url": url,
+                    "valid": False,
+                    "status_code": None,
+                    "final_url": url,
+                    "redirect_count": 0,
+                    "error": str(exc),
                 }
 
     # Preserve original order
@@ -130,8 +135,8 @@ def _prerun_url_checks_parallel(assistant_response: str) -> tuple[list[dict], st
     lines = ["PRE-CHECKED URLS (do NOT call check_url_validity for these):"]
     for r in ordered:
         status = r.get("status_code", "ERR")
-        valid  = r.get("valid", False)
-        tag    = "✓ valid" if valid else "✗ BROKEN"
+        valid = r.get("valid", False)
+        tag = "✓ valid" if valid else "✗ BROKEN"
         lines.append(f"  {r['url']} → HTTP {status} ({tag})")
     lines.append(
         "Apply −0.15 deduction per BROKEN URL to the factuality criterion. "
@@ -145,18 +150,12 @@ def _prerun_url_checks_parallel(assistant_response: str) -> tuple[list[dict], st
 
 # Patterns that capture acronym+expansion pairs in text.
 # Pattern 1: ACRONYM (Expansion) — "NATO (North Atlantic Treaty Organization)"
-_ACR_THEN_EXP = re.compile(
-    r'\b([A-Z]{2,10})\s*\(([A-Za-zÀ-ÿ][^)]{5,100})\)'
-)
+_ACR_THEN_EXP = re.compile(r"\b([A-Z]{2,10})\s*\(([A-Za-zÀ-ÿ][^)]{5,100})\)")
 # Pattern 2: Expansion (ACRONYM) — "United Nations (UN)"
-_EXP_THEN_ACR = re.compile(
-    r'\b([A-Za-zÀ-ÿ][a-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ][a-zÀ-ÿ\']+){1,8})\s*\(([A-Z]{2,10})\)'
-)
+_EXP_THEN_ACR = re.compile(r"\b([A-Za-zÀ-ÿ][a-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ][a-zÀ-ÿ\']+){1,8})\s*\(([A-Z]{2,10})\)")
 # Pattern 3: ACRONYM – Expansion (em dash / hyphen separator)
 # e.g. "OFPRA – Office Français de Protection des Réfugiés et Apatrides"
-_ACR_DASH_EXP = re.compile(
-    r'\b([A-Z]{2,10})\s*[–—-]\s*([A-Za-zÀ-ÿ][^\n.!?]{5,80})'
-)
+_ACR_DASH_EXP = re.compile(r"\b([A-Z]{2,10})\s*[–—-]\s*([A-Za-zÀ-ÿ][^\n.!?]{5,80})")
 
 
 def _extract_acronym_expansions(text: str) -> list[tuple[str, str]]:
@@ -222,20 +221,22 @@ def _prerun_acronym_checks_parallel(
 
     acr_results: list[dict] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(pairs), 5)) as executor:
-        futures = {
-            executor.submit(check_acronym, acr, exp, context_language): (acr, exp)
-            for acr, exp in pairs
-        }
+        futures = {executor.submit(check_acronym, acr, exp, context_language): (acr, exp) for acr, exp in pairs}
         for future in concurrent.futures.as_completed(futures, timeout=45):
             acr, exp = futures[future]
             try:
                 acr_results.append(future.result())
             except Exception as exc:
-                acr_results.append({
-                    "acronym": acr, "claimed_expansion": exp,
-                    "verdict_hint": "unclear", "match_score": 0.0,
-                    "search_results": [], "error": str(exc),
-                })
+                acr_results.append(
+                    {
+                        "acronym": acr,
+                        "claimed_expansion": exp,
+                        "verdict_hint": "unclear",
+                        "match_score": 0.0,
+                        "search_results": [],
+                        "error": str(exc),
+                    }
+                )
 
     # Sort by original extraction order for a stable context string
     order = {acr: i for i, (acr, _) in enumerate(pairs)}
@@ -243,14 +244,14 @@ def _prerun_acronym_checks_parallel(
 
     lines = ["PRE-CHECKED ACRONYMS (do NOT call check_acronym for these):"]
     for r in acr_results:
-        hint     = r.get("verdict_hint", "unclear")
-        score_v  = r.get("match_score", 0.0)
-        acronym  = r.get("acronym", "")
+        hint = r.get("verdict_hint", "unclear")
+        score_v = r.get("match_score", 0.0)
+        acronym = r.get("acronym", "")
         expansion = r.get("claimed_expansion", "")
-        error    = r.get("error", "")
+        error = r.get("error", "")
 
         if error:
-            tag = f"⚠ search failed — treat as unverifiable (−0.05)"
+            tag = "⚠ search failed — treat as unverifiable (−0.05)"
         elif hint == "likely_correct":
             tag = f"✓ likely correct (match {score_v:.0%})"
         elif hint == "likely_wrong":
@@ -258,7 +259,7 @@ def _prerun_acronym_checks_parallel(
         else:
             tag = f"⚠ unclear (match {score_v:.0%}) — review evidence below"
 
-        lines.append(f"  {acronym} → \"{expansion}\": {tag}")
+        lines.append(f'  {acronym} → "{expansion}": {tag}')
 
         # Provide top search evidence so the judge can verify without a tool call
         search_results = r.get("search_results", [])
@@ -276,6 +277,7 @@ def _prerun_acronym_checks_parallel(
 
 
 # ── Tool result summarizer ────────────────────────────────────────────────────
+
 
 def _summarize_tool_result(tool_name: str, args: dict, result_str: str) -> str:
     """
@@ -295,29 +297,29 @@ def _summarize_tool_result(tool_name: str, args: dict, result_str: str) -> str:
             top = data[0]
             snippet = top.get("snippet", "")[:150].replace("\n", " ")
             return (
-                f"search_web('{args.get('query','')}') → "
-                f"{len(data)} result(s). Top: \"{top.get('title','')}\" "
-                f"({top.get('url','')}) — {snippet}"
+                f"search_web('{args.get('query', '')}') → "
+                f'{len(data)} result(s). Top: "{top.get("title", "")}" '
+                f"({top.get('url', '')}) — {snippet}"
             )
-        return f"search_web('{args.get('query','')}') → no results"
+        return f"search_web('{args.get('query', '')}') → no results"
 
     if tool_name == "fetch_url":
         content = data.get("content", "")
         preview = content[:200].replace("\n", " ")
-        return f"fetch_url('{args.get('url','')}'): {len(content)} chars — {preview}"
+        return f"fetch_url('{args.get('url', '')}'): {len(content)} chars — {preview}"
 
     if tool_name == "check_url_validity":
-        valid  = data.get("valid", False)
+        valid = data.get("valid", False)
         status = data.get("status_code", "ERR")
-        tag    = "✓ valid" if valid else "✗ BROKEN"
-        return f"check_url_validity('{args.get('url','')}') → HTTP {status} ({tag})"
+        tag = "✓ valid" if valid else "✗ BROKEN"
+        return f"check_url_validity('{args.get('url', '')}') → HTTP {status} ({tag})"
 
     if tool_name == "check_acronym":
-        hint  = data.get("verdict_hint", "unclear")
+        hint = data.get("verdict_hint", "unclear")
         score = data.get("match_score", 0.0)
         return (
-            f"check_acronym('{args.get('acronym','')}', "
-            f"'{args.get('claimed_expansion','')}') → {hint} (match {score:.0%})"
+            f"check_acronym('{args.get('acronym', '')}', "
+            f"'{args.get('claimed_expansion', '')}') → {hint} (match {score:.0%})"
         )
 
     return result_str[:300]
@@ -325,7 +327,8 @@ def _summarize_tool_result(tool_name: str, args: dict, result_str: str) -> str:
 
 # ── Confidence inference ──────────────────────────────────────────────────────
 
-def _infer_confidence(score: Optional[float]) -> str:
+
+def _infer_confidence(score: float | None) -> str:
     """
     Infer a HIGH / MEDIUM / LOW confidence label from the numeric score.
 
@@ -347,8 +350,8 @@ def _infer_confidence(score: Optional[float]) -> str:
 
 @dataclass
 class AgenticJudgment:
-    valid: Optional[bool]
-    score: Optional[float]
+    valid: bool | None
+    score: float | None
     explanation: str
     tool_calls_made: int
     sources_used: list[str] = field(default_factory=list)
@@ -372,12 +375,12 @@ class AgenticJudgment:
     improvements: list[str] = field(default_factory=list)
 
     # ── Token usage ───────────────────────────────────────────────────────────
-    prompt_tokens_total: Optional[int] = None
-    completion_tokens_total: Optional[int] = None
-    total_tokens_used: Optional[int] = None
-    peak_prompt_tokens: Optional[int] = None
+    prompt_tokens_total: int | None = None
+    completion_tokens_total: int | None = None
+    total_tokens_used: int | None = None
+    peak_prompt_tokens: int | None = None
     token_usage_per_turn: list[dict] = field(default_factory=list)
-    judgment_time_s: Optional[float] = None
+    judgment_time_s: float | None = None
 
 
 def build_agentic_guardrail_system_prompt(*, policy: str, rubric: str) -> str:
@@ -556,16 +559,10 @@ def build_agentic_user_message(
     # Build the remaining phases instruction based on what was pre-run
     remaining: list[str] = []
     if "1" not in phases_done:
-        remaining.append(
-            "Phase 1 (FIRST): call check_url_validity on every URL in the ASSISTANT RESPONSE."
-        )
-    remaining.append(
-        "Phase 2: verify factual claims with search_web / fetch_url."
-    )
+        remaining.append("Phase 1 (FIRST): call check_url_validity on every URL in the ASSISTANT RESPONSE.")
+    remaining.append("Phase 2: verify factual claims with search_web / fetch_url.")
     if "3" not in phases_done:
-        remaining.append(
-            "Phase 3: call check_acronym for every acronym+expansion pair found in the response."
-        )
+        remaining.append("Phase 3: call check_acronym for every acronym+expansion pair found in the response.")
 
     parts.append(
         "\n\n" + "\n".join(remaining) + "\n"
@@ -602,7 +599,7 @@ def _extract_json_candidates(text: str) -> list[str]:
     return candidates
 
 
-def _rederive_score_from_explanation(explanation: str) -> Optional[float]:
+def _rederive_score_from_explanation(explanation: str) -> float | None:
     """
     Extract the final score from the arithmetic in the explanation text.
 
@@ -654,7 +651,7 @@ def parse_judgment_from_text(text: str) -> dict:
                 continue
 
             score_raw = data.get("score")
-            score: Optional[float] = float(score_raw) if score_raw is not None else None
+            score: float | None = float(score_raw) if score_raw is not None else None
             explanation: str = str(data.get("explanation", "")).strip()
 
             # Score integrity: re-derive from explanation arithmetic
@@ -663,7 +660,7 @@ def parse_judgment_from_text(text: str) -> dict:
                 if derived is not None and abs(derived - score) > 0.01:
                     score = derived
 
-            valid: Optional[bool] = (float(score) > VALID_SCORE_THRESHOLD) if score is not None else None
+            valid: bool | None = (float(score) > VALID_SCORE_THRESHOLD) if score is not None else None
 
             # Claim checks (existing field, backward-compatible)
             claim_checks: list[dict] = data.get("claim_checks") or []
@@ -683,9 +680,9 @@ def parse_judgment_from_text(text: str) -> dict:
             tool_changed = data.get("tool_changed_verdict_for") or []
             if not tool_changed and criteria_verdicts:
                 tool_changed = [
-                    cv["criterion"] for cv in criteria_verdicts
-                    if cv.get("tool_influenced") is True
-                    and cv.get("verdict") not in ("COMPLIANT",)
+                    cv["criterion"]
+                    for cv in criteria_verdicts
+                    if cv.get("tool_influenced") is True and cv.get("verdict") not in ("COMPLIANT",)
                 ]
 
             # overall_verdict and confidence
@@ -715,9 +712,15 @@ def parse_judgment_from_text(text: str) -> dict:
             continue
 
     return {
-        "valid": None, "score": None, "explanation": text.strip(),
-        "claim_checks": [], "overall_verdict": "", "confidence": "LOW",
-        "criteria_verdicts": [], "tool_changed_verdict_for": [], "improvements": [],
+        "valid": None,
+        "score": None,
+        "explanation": text.strip(),
+        "claim_checks": [],
+        "overall_verdict": "",
+        "confidence": "LOW",
+        "criteria_verdicts": [],
+        "tool_changed_verdict_for": [],
+        "improvements": [],
     }
 
 
@@ -792,7 +795,7 @@ def run_agentic_guardrail(
     assistant_response: str,
     max_tool_calls: int = MAX_TOOL_CALLS,
     verbose: bool = False,
-    logger: "Optional[ScenarioLogger]" = None,
+    logger: ScenarioLogger | None = None,
     policy_label: str = "",
     nonagentic_hints: str = "",
     scenario_language: str = "en",
@@ -816,9 +819,9 @@ def run_agentic_guardrail(
     tool_call_log: list[dict] = []
     url_checks: list[dict] = []
 
-    _prompt_tokens_total: Optional[int] = None
-    _completion_tokens_total: Optional[int] = None
-    _peak_prompt_tokens: Optional[int] = None
+    _prompt_tokens_total: int | None = None
+    _completion_tokens_total: int | None = None
+    _peak_prompt_tokens: int | None = None
     _token_usage_per_turn: list[dict] = []
 
     _judgment_start = time.perf_counter()
@@ -832,9 +835,7 @@ def run_agentic_guardrail(
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pre_executor:
         url_future = pre_executor.submit(_prerun_url_checks_parallel, assistant_response)
-        acr_future = pre_executor.submit(
-            _prerun_acronym_checks_parallel, assistant_response, scenario_language
-        )
+        acr_future = pre_executor.submit(_prerun_acronym_checks_parallel, assistant_response, scenario_language)
         prerun_url_results, prerun_url_context = url_future.result()
         prerun_acr_results, prerun_acronym_context = acr_future.result()
 
@@ -842,15 +843,13 @@ def run_agentic_guardrail(
 
     if verbose:
         broken = sum(1 for r in prerun_url_results if not r.get("valid"))
-        wrong  = sum(1 for r in prerun_acr_results if r.get("verdict_hint") == "likely_wrong")
+        wrong = sum(1 for r in prerun_acr_results if r.get("verdict_hint") == "likely_wrong")
         print(
             f"      [pre-run] {len(prerun_url_results)} URL(s) ({broken} broken), "
             f"{len(prerun_acr_results)} acronym(s) ({wrong} likely wrong)"
         )
 
-    guardrail_sys_prompt = build_agentic_guardrail_system_prompt(
-        policy=policy_text, rubric=rubric
-    )
+    guardrail_sys_prompt = build_agentic_guardrail_system_prompt(policy=policy_text, rubric=rubric)
     guardrail_user_msg = build_agentic_user_message(
         system_prompt=system_prompt,
         user_message=user_message,
@@ -861,7 +860,7 @@ def run_agentic_guardrail(
     )
     messages: list[dict] = [
         {"role": "system", "content": guardrail_sys_prompt},
-        {"role": "user",   "content": guardrail_user_msg},
+        {"role": "user", "content": guardrail_user_msg},
     ]
 
     if logger is not None:
@@ -886,11 +885,11 @@ def run_agentic_guardrail(
             if verbose:
                 print("      [cap reached — injecting conclusion prompt]")
 
-        call_kwargs: dict = dict(
-            provider=provider.lower(),
-            model=guardrail_model,
-            messages=messages,
-        )
+        call_kwargs: dict = {
+            "provider": provider.lower(),
+            "model": guardrail_model,
+            "messages": messages,
+        }
         if tool_choice != "none":
             call_kwargs["tools"] = TOOL_SCHEMAS
             call_kwargs["tool_choice"] = tool_choice
@@ -906,15 +905,17 @@ def run_agentic_guardrail(
         try:
             usage = resp.usage
             if usage is not None:
-                turn_prompt     = int(getattr(usage, "prompt_tokens", 0) or 0)
+                turn_prompt = int(getattr(usage, "prompt_tokens", 0) or 0)
                 turn_completion = int(getattr(usage, "completion_tokens", 0) or 0)
-                _token_usage_per_turn.append({
-                    "turn": len(_token_usage_per_turn) + 1,
-                    "prompt_tokens": turn_prompt,
-                    "completion_tokens": turn_completion,
-                    "total_tokens": turn_prompt + turn_completion,
-                    "has_tool_calls": None,
-                })
+                _token_usage_per_turn.append(
+                    {
+                        "turn": len(_token_usage_per_turn) + 1,
+                        "prompt_tokens": turn_prompt,
+                        "completion_tokens": turn_completion,
+                        "total_tokens": turn_prompt + turn_completion,
+                        "has_tool_calls": None,
+                    }
+                )
                 _prompt_tokens_total = (_prompt_tokens_total or 0) + turn_prompt
                 _completion_tokens_total = (_completion_tokens_total or 0) + turn_completion
                 if _peak_prompt_tokens is None or turn_prompt > _peak_prompt_tokens:
@@ -930,26 +931,27 @@ def run_agentic_guardrail(
         if not assistant_msg.tool_calls:
             final_text = assistant_msg.content or ""
             j = parse_judgment_from_text(final_text)
-            valid, score, explanation, claim_checks = (
-                j["valid"], j["score"], j["explanation"], j["claim_checks"]
-            )
+            valid, score, explanation, claim_checks = (j["valid"], j["score"], j["explanation"], j["claim_checks"])
 
             if valid is None and score is None:
                 if verbose:
                     print("      [parse failed — retrying with explicit JSON prompt]")
                 messages.append({"role": "assistant", "content": final_text})
                 messages.append(dict(_RETRY_MESSAGE))
-                retry_kwargs: dict = dict(
-                    provider=provider.lower(),
-                    model=guardrail_model,
-                    messages=messages,
-                )
+                retry_kwargs: dict = {
+                    "provider": provider.lower(),
+                    "model": guardrail_model,
+                    "messages": messages,
+                }
                 try:
                     retry_resp = _completion_with_retry(**retry_kwargs)
                     retry_text = retry_resp.choices[0].message.content or ""
                     j = parse_judgment_from_text(retry_text)
                     valid, score, explanation, claim_checks = (
-                        j["valid"], j["score"], j["explanation"], j["claim_checks"]
+                        j["valid"],
+                        j["score"],
+                        j["explanation"],
+                        j["claim_checks"],
                     )
                     try:
                         ru = retry_resp.usage
@@ -958,13 +960,15 @@ def run_agentic_guardrail(
                             rc = int(getattr(ru, "completion_tokens", 0) or 0)
                             _prompt_tokens_total = (_prompt_tokens_total or 0) + rp
                             _completion_tokens_total = (_completion_tokens_total or 0) + rc
-                            _token_usage_per_turn.append({
-                                "turn": len(_token_usage_per_turn) + 1,
-                                "prompt_tokens": rp,
-                                "completion_tokens": rc,
-                                "total_tokens": rp + rc,
-                                "has_tool_calls": False,
-                            })
+                            _token_usage_per_turn.append(
+                                {
+                                    "turn": len(_token_usage_per_turn) + 1,
+                                    "prompt_tokens": rp,
+                                    "completion_tokens": rc,
+                                    "total_tokens": rp + rc,
+                                    "has_tool_calls": False,
+                                }
+                            )
                     except (AttributeError, TypeError, ValueError):
                         pass
                     if valid is not None or score is not None:
@@ -981,16 +985,14 @@ def run_agentic_guardrail(
             # Post-loop URL sweep: check any URLs the judge didn't check during Phase 1.
             # These calls don't consume the tool budget and don't affect the score.
             _already_checked_urls: set[str] = {uc.get("url", "") for uc in url_checks}
-            _url_sweep_re = re.compile(r'https?://\S+', re.IGNORECASE)
+            _url_sweep_re = re.compile(r"https?://\S+", re.IGNORECASE)
             for _m in _url_sweep_re.finditer(assistant_response):
-                _raw_url = _m.group(0).rstrip('.,;:!?)]\'"<>')
+                _raw_url = _m.group(0).rstrip(".,;:!?)]'\"<>")
                 if not _raw_url or _raw_url in _already_checked_urls:
                     continue
                 if verbose:
                     print(f"      [url sweep] check_url_validity: {_raw_url}")
-                _sweep_str = dispatch_tool_call(
-                    "check_url_validity", json.dumps({"url": _raw_url})
-                )
+                _sweep_str = dispatch_tool_call("check_url_validity", json.dumps({"url": _raw_url}))
                 try:
                     _sweep_result = json.loads(_sweep_str)
                     url_checks.append(_sweep_result)
@@ -1066,11 +1068,13 @@ def run_agentic_guardrail(
             if tool_calls_made >= max_tool_calls:
                 if verbose:
                     print(f"      [budget exhausted — skipping {tc.function.name}]")
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": _sanitize_tool_id(tc.id),
-                    "content": json.dumps({"error": "Tool call skipped: tool call budget exhausted."}),
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": _sanitize_tool_id(tc.id),
+                        "content": json.dumps({"error": "Tool call skipped: tool call budget exhausted."}),
+                    }
+                )
                 continue
 
             tool_name = tc.function.name
@@ -1089,7 +1093,9 @@ def run_agentic_guardrail(
                 elif tool_name == "check_url_validity":
                     print(f"      [tool {tool_calls_made + 1}] check_url_validity:  {args_parsed.get('url', '')}")
                 elif tool_name == "check_acronym":
-                    print(f"      [tool {tool_calls_made + 1}] check_acronym:       {args_parsed.get('acronym', '')!r} = {args_parsed.get('claimed_expansion', '')!r} [{args_parsed.get('context_language', 'en')}]")
+                    print(
+                        f"      [tool {tool_calls_made + 1}] check_acronym:       {args_parsed.get('acronym', '')!r} = {args_parsed.get('claimed_expansion', '')!r} [{args_parsed.get('context_language', 'en')}]"
+                    )
 
             result_str = dispatch_tool_call(tool_name, tool_args)
             tool_calls_made += 1
@@ -1101,9 +1107,11 @@ def run_agentic_guardrail(
                         count = len(result_data)
                         if count:
                             first = result_data[0]
-                            print(f"        ✓ {count} result(s). First: {first.get('title', '')!r} — {first.get('url', '')}")
+                            print(
+                                f"        ✓ {count} result(s). First: {first.get('title', '')!r} — {first.get('url', '')}"
+                            )
                         else:
-                            print(f"        ✗ No results returned")
+                            print("        ✗ No results returned")
                     elif isinstance(result_data, dict) and result_data.get("error") and "content" not in result_data:
                         print(f"        ✗ Tool error: {result_data['error']}")
                     elif isinstance(result_data, dict) and "status_code" in result_data:
@@ -1143,18 +1151,17 @@ def run_agentic_guardrail(
                     acr_result = json.loads(result_str)
                     hint = acr_result.get("verdict_hint", "unclear")
                     score_val = acr_result.get("match_score", 0.0)
-                    sources_used.append(
-                        f"acronym: {acronym!r} → claimed={expansion!r} "
-                        f"hint={hint} match={score_val}"
-                    )
+                    sources_used.append(f"acronym: {acronym!r} → claimed={expansion!r} hint={hint} match={score_val}")
                 except (json.JSONDecodeError, AttributeError):
                     sources_used.append(f"acronym: {acronym!r} → error")
 
-            tool_call_log.append({
-                "tool": tool_name,
-                "input": args_parsed,
-                "output_preview": result_str,
-            })
+            tool_call_log.append(
+                {
+                    "tool": tool_name,
+                    "input": args_parsed,
+                    "output_preview": result_str,
+                }
+            )
 
             if logger is not None:
                 logger.log_tool_call(
@@ -1177,8 +1184,10 @@ def run_agentic_guardrail(
             else:
                 tool_content = summary
 
-            messages.append({
-                "role": "tool",
-                "tool_call_id": _sanitize_tool_id(tc.id),
-                "content": tool_content,
-            })
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": _sanitize_tool_id(tc.id),
+                    "content": tool_content,
+                }
+            )
