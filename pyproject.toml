@@ -1,0 +1,41 @@
+[project]
+name = "guardrail-agentic"
+version = "0.1.0"
+description = "Research toolkit comparing agentic vs non-agentic LLM guardrail evaluation on multilingual safety scenarios."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    # Dashboard + data (Part A and Part B)
+    "streamlit>=1.35.0",            # interactive results dashboard (visualize_results.py)
+    "pandas>=2.0.0",                # tables in the dashboard
+    # Guardrail + LLM interface
+    "any-guardrail[flowjudge,huggingface]==0.2.2",
+    "any-llm-sdk[openai,anthropic,gemini,mistral]<1",  # any-guardrail 0.2.2 requires any-llm-sdk<1
+                                                       # (extra is `gemini`, not `google`; pulls google-genai)
+    "python-dotenv==1.2.1",
+    # Numerical / scientific
+    "numpy==2.2.6",
+    "scipy==1.16.3",
+    # HuggingFace stack (local guardrail models: FlowJudge, etc.)
+    "transformers==4.57.3",
+    "huggingface_hub==0.36.0",
+    # Deep learning backend
+    "torch==2.9.1",
+]
+
+[project.optional-dependencies]
+# Retrieval tools for the agentic guardrail path (Part B).
+# Install with: uv sync --extra agentic
+agentic = [
+    "ddgs>=6.0.0",            # DuckDuckGo backend (default; no API key)
+    "requests>=2.31.0",       # SearXNG JSON API, fetch_url, check_url_validity
+    "beautifulsoup4>=4.12.0", # HTML → text extraction for the DDG/SearXNG fetch path
+    "tavily-python>=0.3.0",   # Tavily backend (managed search + extract API)
+    "tiktoken>=0.7.0",        # exact token counts for the non-agentic path
+]
+
+# This is a flat-layout research toolkit run as scripts (modules import each other
+# by bare name via sys.path), not an installable library — so uv manages the
+# environment without trying to build/install the project itself.
+[tool.uv]
+package = false
