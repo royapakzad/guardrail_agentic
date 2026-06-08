@@ -33,9 +33,50 @@ agentic = [
     "tavily-python>=0.3.0",   # Tavily backend (managed search + extract API)
     "tiktoken>=0.7.0",        # exact token counts for the non-agentic path
 ]
+# Linters / type checker / pre-commit (mirrors mozilla-ai/any-llm tooling).
+# Install with: uv sync --extra dev
+dev = [
+    "ruff==0.15.12",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+    "types-requests",
+    "types-beautifulsoup4",
+]
 
 # This is a flat-layout research toolkit run as scripts (modules import each other
 # by bare name via sys.path), not an installable library — so uv manages the
 # environment without trying to build/install the project itself.
 [tool.uv]
 package = false
+
+# ── Ruff (lint + format) ──────────────────────────────────────────────────────
+# Line length and tooling version match any-llm. Rule selection is intentionally
+# moderate (not any-llm's `extend-select = ["ALL"]`) so the first lint pass stays
+# reviewable on an existing research codebase; it can be ratcheted up over time.
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+# Exclude the Streamlit dashboard and the standalone demo script (dense, one-liner
+# style) — matches any-llm's "exclude demos|scripts" convention and the mypy exclude.
+extend-exclude = ["visualize_results.py", "agentic_guardrails/demo_guardrail_log.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = [
+    "E501",  # line length: prompts/docstrings are long by design; formatter handles code
+    "E402",  # module import not at top: the flat-script layout sets sys.path before imports
+    "B008",  # function calls in argument defaults (not used dangerously here)
+    "SIM105", # contextlib.suppress vs try/except-pass — readability preference
+]
+
+# ── mypy ──────────────────────────────────────────────────────────────────────
+# Lenient to start (third-party libs are untyped); excludes demos/dashboard.
+# Tighten toward any-llm's `strict = true` incrementally in later PRs.
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = false
+exclude = [
+    "agentic_guardrails/demo_guardrail_log.py",
+    "visualize_results.py",
+]
