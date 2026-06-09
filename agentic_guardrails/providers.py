@@ -55,14 +55,14 @@ def call_llm(
                        default). Some models (e.g. gpt-5-mini, o-series) reject
                        any explicit temperature value and require the default.
     """
-    kwargs: dict = dict(
-        provider=provider.lower(),
-        model=model,
-        messages=[
+    kwargs: dict = {
+        "provider": provider.lower(),
+        "model": model,
+        "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ],
-    )
+    }
     # Only send temperature when explicitly set — models like gpt-5-mini and
     # the o-series reject temperature=0.0 and require the API default.
     if temperature is not None:

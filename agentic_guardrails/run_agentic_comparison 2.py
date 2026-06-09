@@ -20,28 +20,18 @@ Pipeline per scenario row
                                (LLM with search_web / fetch_url tool calls)
   3. Compare both judgments  → score delta, judgment_changed, sources used
 
-Both non-agentic and agentic explanations use the same numbered-criterion format
-(one entry per policy criterion), so the only variable between the two paths is
-whether the judge had access to retrieval tools.
-
 Usage example
 ~~~~~~~~~~~~~
-  # With DuckDuckGo (default, no setup):
   python run_agentic_comparison.py \\
     --input ../data/scenarios_sample_short.csv \\
     --output-prefix ../outputs/agentic_run1 \\
-    --guardrail anyllm \\
+    --guardrail flowjudge \\
     --provider openai --model gpt-5-mini \\
-    --guardrail-judges openai:gpt-5-nano anthropic:claude-sonnet-4-6 \\
+    --guardrail-provider openai --guardrail-model gpt-5 \\
+    --assistant-system-prompt-file ../config/assistant_system_prompt.txt \\
     --policy-files ../config/policy.txt ../config/policy_fa.txt \\
     --rubric-file ../config/rubric.txt \\
-    --web-search-tool duckduckgo
-
-  # With Tavily (requires TAVILY_API_KEY in .env):
-    --web-search-tool tavily
-
-  # With SearXNG (requires Docker + running SearXNG instance):
-    --web-search-tool searxng
+    --max-tool-calls 5
 """
 from __future__ import annotations
 
@@ -50,7 +40,6 @@ import csv
 import os
 import re
 import sys
-import time
 import warnings
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
@@ -75,7 +64,6 @@ from guardrails_runner import (
     load_text_file,
     build_guardrail_input_text,
     run_guardrail_for_policy,
-    _build_nonagentic_hints,
 )
 from agentic_runner import run_agentic_guardrail, AgenticJudgment
 from comparison import compare_judgments
@@ -272,21 +260,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     # ---- Agentic settings ---------------------------------------------------
     p.add_argument(
-        "--web-search-tool",
-        default="duckduckgo",
-        choices=["duckduckgo", "searxng", "tavily"],
-        help=(
-            "Web search backend for the agentic guardrail (default: duckduckgo). "
-            "duckduckgo: no setup required, may rate-limit. "
-            "searxng: self-hosted, requires Docker + SEARXNG_BASE_URL in .env. "
-            "tavily: managed API, requires TAVILY_API_KEY in .env."
-        ),
-    )
-    p.add_argument(
         "--max-tool-calls",
         type=int,
         default=5,
         help="Maximum tool invocations per agentic evaluation (default: 5).",
+    )
+    p.add_argument(
+        "--web-search-tool",
+        default="duckduckgo",
+        choices=["duckduckgo", "tavily", "searxng"],
+        help=(
+            "Web search backend for agentic evaluations (default: duckduckgo). "
+            "tavily requires TAVILY_API_KEY env var. "
+            "searxng requires a running instance; set SEARXNG_BASE_URL (default: http://localhost:8888)."
+        ),
     )
     p.add_argument(
         "--verbose",
@@ -374,7 +361,6 @@ def process_row(
             "guardrail_backend": type(guardrail).__name__,
             "guardrail_judges": [j.model_id for j in judges],
             "max_tool_calls_allowed": max_tool_calls,
-            "web_search_tool": web_search_tool,
         }
     )
 
@@ -403,7 +389,6 @@ def process_row(
             if verbose:
                 print(f"        non-agentic eval ...", end=" ", flush=True)
             na_prompt_tokens = _count_tokens(nonagentic_eval_text, model=judge.model)
-            _na_start = time.perf_counter()
             try:
                 gr = run_guardrail_for_policy(
                     guardrail=guardrail,
@@ -414,20 +399,14 @@ def process_row(
                     assistant_response=assistant_response,
                     model_id=judge.model_id,
                 )
-                _na_elapsed = round(time.perf_counter() - _na_start, 3)
                 na_completion_tokens = _count_tokens(str(gr.explanation or ""), model=judge.model)
                 na_total_tokens = na_prompt_tokens + na_completion_tokens
                 out[f"{base}_nonagentic_valid"] = gr.valid
                 out[f"{base}_nonagentic_score"] = gr.score
                 out[f"{base}_nonagentic_explanation"] = gr.explanation
-                out[f"{base}_nonagentic_overall_verdict"] = gr.overall_verdict
-                out[f"{base}_nonagentic_confidence"] = gr.confidence
-                out[f"{base}_nonagentic_criteria_verdicts"] = gr.criteria_verdicts
-                out[f"{base}_nonagentic_improvements"] = gr.improvements
                 out[f"{base}_nonagentic_prompt_tokens"] = na_prompt_tokens
                 out[f"{base}_nonagentic_completion_tokens"] = na_completion_tokens
                 out[f"{base}_nonagentic_total_tokens"] = na_total_tokens
-                out[f"{base}_nonagentic_judgment_time_s"] = _na_elapsed
                 if logger is not None:
                     logger.log_nonagentic_eval(
                         policy_label=f"{policy_label}[{judge.model_id}]",
@@ -442,16 +421,14 @@ def process_row(
                         total_tokens=na_total_tokens,
                     )
                 if verbose:
-                    print(f"score={gr.score}  valid={gr.valid}  tokens={na_total_tokens:,}  time={_na_elapsed:.2f}s")
+                    print(f"score={gr.score}  valid={gr.valid}  tokens={na_total_tokens:,}")
             except Exception as e:
-                _na_elapsed = round(time.perf_counter() - _na_start, 3)
                 out[f"{base}_nonagentic_valid"] = None
                 out[f"{base}_nonagentic_score"] = None
                 out[f"{base}_nonagentic_explanation"] = f"ERROR: {e}"
                 out[f"{base}_nonagentic_prompt_tokens"] = na_prompt_tokens
                 out[f"{base}_nonagentic_completion_tokens"] = None
                 out[f"{base}_nonagentic_total_tokens"] = na_prompt_tokens
-                out[f"{base}_nonagentic_judgment_time_s"] = _na_elapsed
                 if logger is not None:
                     logger.log_nonagentic_eval(
                         policy_label=f"{policy_label}[{judge.model_id}]",
@@ -471,9 +448,6 @@ def process_row(
             nonagentic_valid = out.get(f"{base}_nonagentic_valid")
             nonagentic_score = out.get(f"{base}_nonagentic_score")
 
-            # Build hints for two-stage targeting (Improvement 4)
-            na_hints = _build_nonagentic_hints(gr) if "gr" in dir() else ""
-
             # 2b. Agentic path
             if verbose:
                 print(f"        agentic eval (max {max_tool_calls} tool calls) ...")
@@ -489,9 +463,8 @@ def process_row(
                     max_tool_calls=max_tool_calls,
                     verbose=verbose,
                     logger=logger,
-                    nonagentic_hints=na_hints,
-                    scenario_language=language or "en",
                     policy_label=f"{policy_label}[{judge.model_id}]",
+                    web_search_tool=web_search_tool,
                 )
             except Exception as e:
                 aj = AgenticJudgment(
@@ -506,22 +479,15 @@ def process_row(
             out[f"{base}_agentic_valid"] = aj.valid
             out[f"{base}_agentic_score"] = aj.score
             out[f"{base}_agentic_explanation"] = aj.explanation
-            out[f"{base}_agentic_overall_verdict"] = aj.overall_verdict
-            out[f"{base}_agentic_confidence"] = aj.confidence
-            out[f"{base}_agentic_criteria_verdicts"] = aj.criteria_verdicts
-            out[f"{base}_agentic_tool_changed_verdict_for"] = aj.tool_changed_verdict_for
-            out[f"{base}_agentic_improvements"] = aj.improvements
             out[f"{base}_agentic_tool_calls_made"] = aj.tool_calls_made
             out[f"{base}_agentic_sources_used"] = aj.sources_used
             out[f"{base}_agentic_tool_call_log"] = aj.tool_call_log
             out[f"{base}_agentic_url_checks"] = aj.url_checks
-            out[f"{base}_agentic_claim_checks"] = aj.claim_checks
             out[f"{base}_agentic_prompt_tokens_total"] = aj.prompt_tokens_total
             out[f"{base}_agentic_completion_tokens_total"] = aj.completion_tokens_total
             out[f"{base}_agentic_total_tokens"] = aj.total_tokens_used
             out[f"{base}_agentic_peak_prompt_tokens"] = aj.peak_prompt_tokens
             out[f"{base}_agentic_token_usage_per_turn"] = aj.token_usage_per_turn
-            out[f"{base}_agentic_judgment_time_s"] = aj.judgment_time_s
 
             # 2c. Comparison
             cmp = compare_judgments(
@@ -589,12 +555,6 @@ def main() -> None:
 
     parser = build_arg_parser()
     args = parser.parse_args()
-
-    # ---- Configure web search backend for agentic tools --------------------
-    # Must be done before any tool calls; all workers share the module-level state.
-    import tools as _tools_mod
-    _tools_mod.set_search_backend(args.web_search_tool)
-    print(f"Web search backend: {args.web_search_tool.upper()}")
 
     # ---- Load shared text configs -------------------------------------------
     # These files are read once and passed to every row's evaluation.
@@ -699,27 +659,9 @@ def main() -> None:
     if log_dir:
         print(f"Scenario logs → {log_dir}/")
 
-    # ---- Base columns (needed for incremental flushing) --------------------
-    # Computed once before the loop so the checkpoint writer can use it on
-    # every iteration without waiting for all rows to complete.
-    base_keys: set = set(rows_in[0].keys()) if rows_in else set()
-    base_keys |= {
-        "provider", "model", "assistant_system_prompt", "assistant_response",
-        "guardrail_backend", "max_tool_calls_allowed", "web_search_tool", "error",
-    }
-
-    def _flush(rows: list, *, label: str = "") -> None:
-        """Write current rows to all output files (per-judge + mega)."""
-        for judge in judges:
-            judge_rows = _extract_judge_rows(rows, judge, base_keys)
-            write_outputs(judge_rows, f"{args.output_prefix}_{judge.label}")
-        write_outputs(rows, f"{args.output_prefix}_all")
-
     # ---- Main pipeline loop ------------------------------------------------
     # Each row is independent. Errors are caught per-row so a single API
     # failure does not abort the entire run.
-    # After every row, outputs are flushed to disk so partial results are
-    # available even if the run crashes or is interrupted mid-way.
     rows_out = []
     total = len(rows_in)
 
@@ -750,12 +692,14 @@ def main() -> None:
             print(f"  ERROR: {e}")
         rows_out.append(out_row)
 
-        # Flush after every row — cheap compared to LLM API calls, and ensures
-        # a crash or keyboard-interrupt never loses more than one row's work.
-        _flush(rows_out)
-        print(f"  ✓ checkpoint saved ({idx}/{total} rows)")
+    # ---- Write outputs -----------------------------------------------------
+    # Base columns are non-judge-specific and included in every per-judge file.
+    base_keys: set = set(rows_in[0].keys()) if rows_in else set()
+    base_keys |= {
+        "provider", "model", "assistant_system_prompt", "assistant_response",
+        "guardrail_backend", "max_tool_calls_allowed", "error",
+    }
 
-    # ---- Final write (identical to last checkpoint, confirms completion) ----
     # Per-judge files: clean column names (no judge label), compatible with
     # visualize_results.py. Written to <output_prefix>_<judge_label>.[csv|json]
     print("\nPer-judge outputs:")
