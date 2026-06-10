@@ -31,317 +31,391 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
 
-/* ── Force light theme globally ── */
+/* ── Base ─────────────────────────────────────────────────────────────────── */
 html, body, .stApp { background-color: #F7F9FC !important; }
-[class*="css"], .stMarkdown, p, span, div, td, th, label, li {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+
+/* Apply Inter to all text — but NOT to Streamlit icon elements which use
+   a special icon font. The * selector would corrupt icon rendering. */
+body, .stMarkdown, p, div, td, th, label, li, button, input, select, textarea,
+h1, h2, h3, h4, h5, h6, .stApp, [class*="css"] {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
     color: #1E293B;
 }
-#MainMenu, footer, header { visibility: hidden; }
 
-/* ── Main content area ── */
-.block-container { background: #F7F9FC !important; padding-top: 2rem !important; }
+/* Preserve Streamlit's icon font for expander toggles and material icons */
+[data-testid="stExpanderToggleIcon"],
+[data-testid="stIconMaterial"],
+[data-baseweb="icon"],
+.material-symbols-rounded,
+span[aria-hidden="true"] {
+    font-family: inherit !important;
+}
+
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { background: #F7F9FC !important; padding-top: 2rem !important; max-width: 1440px; }
 section[data-testid="stMain"] { background: #F7F9FC !important; }
 
-/* ════════════════════════════════════════════════════════════════
-   WIDGET OVERRIDES — force light bg on every Streamlit component
-   ════════════════════════════════════════════════════════════════ */
+/* ── Headings ────────────────────────────────────────────────────────────── */
+h1 {
+    font-size: 1.65rem !important; font-weight: 800 !important;
+    color: #0F172A !important; letter-spacing: -.02em;
+    margin-bottom: .35rem; line-height: 1.2;
+}
+h2 {
+    font-size: 1.2rem !important; font-weight: 700 !important;
+    color: #0F172A !important; margin: 1.8rem 0 .6rem;
+    padding-bottom: 8px; border-bottom: 2px solid #E2E8F0;
+    letter-spacing: -.01em;
+}
+h3 {
+    font-size: 1.0rem !important; font-weight: 600 !important;
+    color: #334155 !important; margin: 1.2rem 0 .5rem;
+}
+strong { color: #0F172A !important; }
+p { font-size: .96rem; line-height: 1.75; color: #334155; }
 
-/* SelectBox + MultiSelect outer pill */
+/* ── Widgets ─────────────────────────────────────────────────────────────── */
 [data-testid="stSelectbox"] > div > div,
 [data-testid="stMultiSelect"] > div > div {
     background-color: #fff !important; border: 1px solid #E2E8F0 !important;
     border-radius: 8px !important; color: #1E293B !important;
 }
-/* BaseWeb select control box */
 [data-baseweb="select"] > div:first-child {
     background-color: #fff !important; border-color: #E2E8F0 !important;
-    border-radius: 8px !important; min-height: 38px;
+    border-radius: 8px !important; min-height: 42px;
 }
 [data-baseweb="select"] * { color: #1E293B !important; }
 [data-baseweb="select"] svg { fill: #64748B !important; }
-/* Dropdown open-list */
 [data-baseweb="popover"] { z-index: 9999 !important; }
 [data-baseweb="menu"], [data-baseweb="list"] {
     background-color: #fff !important; border: 1px solid #E2E8F0 !important;
-    border-radius: 8px !important; box-shadow: 0 8px 24px rgba(15,23,42,.10) !important;
+    border-radius: 10px !important; box-shadow: 0 8px 32px rgba(15,23,42,.12) !important;
 }
 [data-baseweb="list-item"], [data-baseweb="option"] {
     background-color: #fff !important; color: #1E293B !important;
-    font-size: .87rem !important;
+    font-size: .92rem !important; padding: 9px 14px !important;
 }
 [data-baseweb="list-item"]:hover { background-color: #EFF6FF !important; }
-/* MultiSelect tag chips (e.g. "en ×") */
 [data-baseweb="tag"] {
     background-color: #EFF6FF !important; border: 1px solid #BFDBFE !important;
     border-radius: 6px !important;
 }
-[data-baseweb="tag"] span, [data-baseweb="tag"] button { color: #1D4ED8 !important; }
-/* Input fields */
+[data-baseweb="tag"] span, [data-baseweb="tag"] button { color: #1D4ED8 !important; font-size: .84rem !important; }
 [data-baseweb="input"], [data-baseweb="base-input"],
 [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input {
     background-color: #fff !important; color: #1E293B !important;
-    border-color: #E2E8F0 !important;
+    border-color: #E2E8F0 !important; font-size: .93rem !important;
 }
-/* Checkbox */
-[data-testid="stCheckbox"] label { color: #334155 !important; font-size: .86rem !important; }
+[data-testid="stCheckbox"] label { color: #334155 !important; font-size: .92rem !important; }
 [data-baseweb="checkbox"] div[role="checkbox"] {
     border-color: #94A3B8 !important; background-color: #fff !important;
     border-radius: 4px !important;
 }
-/* Radio */
-[data-testid="stRadio"] label { color: #334155 !important; }
+[data-testid="stRadio"] label { color: #334155 !important; font-size: .92rem !important; }
 [data-testid="stRadio"] div[role="radiogroup"] label span { color: #475569 !important; }
-/* File uploader */
 [data-testid="stFileUploader"] section {
     background: #fff !important; border: 2px dashed #CBD5E1 !important;
-    border-radius: 10px !important; padding: 12px !important;
+    border-radius: 12px !important; padding: 20px !important;
 }
 [data-testid="stFileUploader"] label,
-[data-testid="stFileUploader"] p { color: #64748B !important; }
-/* DataFrame container */
+[data-testid="stFileUploader"] p { color: #64748B !important; font-size: .92rem !important; }
 [data-testid="stDataFrame"] {
     background: #fff !important; border: 1px solid #E2E8F0 !important;
-    border-radius: 10px !important; overflow: hidden;
+    border-radius: 12px !important; overflow: hidden;
 }
 [data-testid="stDataFrame"] > div { background: #fff !important; }
-/* Caption */
 [data-testid="stCaptionContainer"] p, .stCaption {
-    color: #64748B !important; font-size: .79rem !important;
+    color: #64748B !important; font-size: .83rem !important; line-height: 1.6 !important;
 }
-/* Buttons */
 [data-testid="baseButton-secondary"], button[kind="secondary"] {
     background: #fff !important; border: 1px solid #E2E8F0 !important;
-    color: #334155 !important; border-radius: 8px !important;
+    color: #334155 !important; border-radius: 8px !important; font-size: .92rem !important;
 }
 [data-testid="baseButton-primary"], button[kind="primary"] {
     background: #2563EB !important; color: #fff !important;
-    border-radius: 8px !important; border: none !important;
+    border-radius: 8px !important; border: none !important; font-size: .92rem !important;
 }
-/* Column headers and container backgrounds */
 [data-testid="column"] { background: transparent !important; }
-/* Expanders — light background */
 details { background: #fff !important; }
 summary { color: #1E293B !important; font-weight: 600 !important; }
 
-/* ── Sidebar ── */
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
-    background: #1E293B !important;
-    border-right: 1px solid #334155;
+    background: #0F172A !important;
+    border-right: 1px solid #1E293B;
+    min-width: 270px;
 }
 [data-testid="stSidebar"] .stMarkdown,
 [data-testid="stSidebar"] p,
 [data-testid="stSidebar"] span,
 [data-testid="stSidebar"] label,
-[data-testid="stSidebar"] div { color: #CBD5E1 !important; }
-[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] div { color: #CBD5E1 !important; font-size: .92rem !important; }
+[data-testid="stSidebar"] h1 {
+    color: #F8FAFC !important; font-weight: 800 !important;
+    font-size: 1.25rem !important; letter-spacing: -.01em;
+    border-bottom: none; padding-bottom: 0; margin-bottom: .15rem;
+}
 [data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3 { color: #F1F5F9 !important; font-weight: 700 !important; }
+[data-testid="stSidebar"] h3 {
+    color: #94A3B8 !important; font-weight: 700 !important;
+    font-size: .72rem !important; text-transform: uppercase;
+    letter-spacing: .10em; margin: 1.2rem 0 .5rem;
+    border-bottom: none; padding-bottom: 0;
+}
 [data-testid="stSidebar"] .stSelectbox > div > div {
-    background: #334155 !important; border-color: #475569 !important; color: #E2E8F0 !important;
+    background: #1E293B !important; border-color: #334155 !important; color: #E2E8F0 !important;
 }
-[data-testid="stSidebar"] hr { border-color: #334155 !important; }
+[data-testid="stSidebar"] [data-baseweb="select"] > div:first-child {
+    background: #1E293B !important; border-color: #334155 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] * { color: #E2E8F0 !important; }
+[data-testid="stSidebar"] [data-testid="stMultiSelect"] > div > div {
+    background: #1E293B !important; border-color: #334155 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="tag"] {
+    background: #1D4ED822 !important; border-color: #3B82F688 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="tag"] span { color: #93C5FD !important; }
+[data-testid="stSidebar"] hr { border-color: #1E293B !important; margin: 14px 0; }
 [data-testid="stSidebar"] .stFileUploader label { color: #94A3B8 !important; }
-
-/* ── Metrics ── */
-[data-testid="metric-container"] {
-    background: #fff; border: 1px solid #E2E8F0; border-radius: 10px;
-    padding: 14px 16px !important; box-shadow: 0 1px 4px rgba(15,23,42,.06);
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p,
+[data-testid="stSidebar"] .stCaption {
+    color: #64748B !important; font-size: .82rem !important;
 }
-[data-testid="stMetricValue"] { font-size:1.5rem !important; font-weight:800 !important; color:#0F172A !important; }
-[data-testid="stMetricLabel"] { font-size:.68rem !important; font-weight:600 !important; color:#64748B !important; text-transform:uppercase; letter-spacing:.06em; }
-[data-testid="stMetricDelta"] { font-size:.78rem !important; font-weight:500 !important; }
 
-/* ── Tabs ── */
+/* ── Metrics ─────────────────────────────────────────────────────────────── */
+[data-testid="metric-container"] {
+    background: #fff; border: 1px solid #E2E8F0; border-radius: 14px;
+    padding: 20px 22px !important; box-shadow: 0 1px 6px rgba(15,23,42,.06);
+    transition: box-shadow .15s ease;
+}
+[data-testid="metric-container"]:hover {
+    box-shadow: 0 4px 20px rgba(15,23,42,.10);
+}
+[data-testid="stMetricValue"] {
+    font-size: 1.85rem !important; font-weight: 800 !important;
+    color: #0F172A !important; line-height: 1.15 !important;
+}
+[data-testid="stMetricLabel"] {
+    font-size: .76rem !important; font-weight: 700 !important;
+    color: #64748B !important; text-transform: uppercase;
+    letter-spacing: .07em; margin-bottom: 5px !important;
+}
+[data-testid="stMetricDelta"] { font-size: .85rem !important; font-weight: 600 !important; }
+
+/* ── Tabs ────────────────────────────────────────────────────────────────── */
 .stTabs [data-baseweb="tab-list"] {
-    gap: 2px; border-bottom: 2px solid #E2E8F0; background: transparent;
+    gap: 4px; border-bottom: 2px solid #E2E8F0; background: transparent;
+    padding-bottom: 0;
 }
 .stTabs [data-baseweb="tab"] {
-    font-weight: 500; font-size: .86rem; color: #64748B;
-    padding: 8px 18px; border-radius: 8px 8px 0 0; background: transparent;
+    font-weight: 500; font-size: .95rem; color: #64748B;
+    padding: 10px 22px; border-radius: 8px 8px 0 0; background: transparent;
+    transition: color .15s, background .15s;
 }
+.stTabs [data-baseweb="tab"]:hover { color: #475569 !important; background: #F8FAFC !important; }
 .stTabs [aria-selected="true"] {
     color: #2563EB !important; font-weight: 700 !important;
     border-bottom: 2px solid #2563EB !important; background: #EFF6FF !important;
 }
 
-/* ── Headings ── */
-h1 { font-size:1.4rem !important; font-weight:800 !important; color:#0F172A !important; letter-spacing:-.02em; margin-bottom:.25rem; }
-h2 { font-size:1.05rem !important; font-weight:700 !important; color:#1E293B !important; margin:.5rem 0 .25rem; }
-h3 { font-size:.90rem !important; font-weight:600 !important; color:#334155 !important; }
-strong { color: #0F172A !important; }
-
-/* ── DataFrames ── */
+/* ── DataFrames ──────────────────────────────────────────────────────────── */
 [data-testid="stDataFrame"] th {
-    font-weight:600 !important; font-size:.72rem !important; text-transform:uppercase;
-    letter-spacing:.05em; color:#475569 !important; background:#F1F5F9 !important;
+    font-weight: 700 !important; font-size: .80rem !important; text-transform: uppercase;
+    letter-spacing: .05em; color: #475569 !important; background: #F8FAFC !important;
+    padding: 11px 14px !important;
 }
-[data-testid="stDataFrame"] td { color:#334155 !important; font-size:.83rem !important; }
+[data-testid="stDataFrame"] td {
+    color: #334155 !important; font-size: .92rem !important;
+    padding: 9px 14px !important; line-height: 1.5;
+}
 
-/* ── Expanders ── */
+/* ── Expanders ───────────────────────────────────────────────────────────── */
 [data-testid="stExpander"] {
     background: #fff; border: 1px solid #E2E8F0 !important;
-    border-radius: 10px !important; overflow: hidden;
+    border-radius: 12px !important; overflow: hidden; margin-bottom: 10px;
 }
 [data-testid="stExpander"] summary {
-    font-weight: 600 !important; font-size: .86rem !important;
-    color: #1E293B !important; padding: 10px 14px;
+    font-weight: 600 !important; font-size: .95rem !important;
+    color: #1E293B !important; padding: 14px 18px;
+    transition: background .1s;
 }
+[data-testid="stExpander"] summary:hover { background: #F8FAFC !important; }
 
-/* ── Info / success / warning / error boxes ── */
-[data-testid="stInfo"]    { background:#EFF6FF; border-left:3px solid #3B82F6; border-radius:8px; color:#1E3A5F !important; }
-[data-testid="stSuccess"] { background:#F0FDF4; border-left:3px solid #22C55E; border-radius:8px; color:#14532D !important; }
-[data-testid="stWarning"] { background:#FFFBEB; border-left:3px solid #F59E0B; border-radius:8px; color:#78350F !important; }
-[data-testid="stError"]   { background:#FEF2F2; border-left:3px solid #EF4444; border-radius:8px; color:#7F1D1D !important; }
+/* ── Alert boxes ─────────────────────────────────────────────────────────── */
+[data-testid="stInfo"]    { background: #EFF6FF; border-left: 4px solid #3B82F6; border-radius: 10px; color: #1E3A5F !important; font-size: .93rem !important; padding: 14px 18px !important; }
+[data-testid="stSuccess"] { background: #F0FDF4; border-left: 4px solid #22C55E; border-radius: 10px; color: #14532D !important; font-size: .93rem !important; padding: 14px 18px !important; }
+[data-testid="stWarning"] { background: #FFFBEB; border-left: 4px solid #F59E0B; border-radius: 10px; color: #78350F !important; font-size: .93rem !important; padding: 14px 18px !important; }
+[data-testid="stError"]   { background: #FEF2F2; border-left: 4px solid #EF4444; border-radius: 10px; color: #7F1D1D !important; font-size: .93rem !important; padding: 14px 18px !important; }
 
-/* ── Dividers ── */
-hr { border-color: #E2E8F0 !important; margin: 1rem 0; }
+/* ── Dividers ────────────────────────────────────────────────────────────── */
+hr { border-color: #E2E8F0 !important; margin: 1.8rem 0; }
 
 /* ════════════════════════════════════════════════════════════════
    CUSTOM COMPONENT CLASSES
    ════════════════════════════════════════════════════════════════ */
 
-/* Pass / Fail badges (small, inline) */
+/* Pass / Fail badges */
 .badge-pass {
-    display:inline-block; background:#DCFCE7; color:#166534 !important;
-    font-weight:700; font-size:.68rem; padding:3px 9px; border-radius:999px;
-    letter-spacing:.03em;
+    display: inline-flex; align-items: center; gap: 3px;
+    background: #DCFCE7; color: #166534 !important;
+    font-weight: 700; font-size: .78rem; padding: 4px 12px;
+    border-radius: 999px; letter-spacing: .03em;
 }
 .badge-fail {
-    display:inline-block; background:#FEE2E2; color:#991B1B !important;
-    font-weight:700; font-size:.68rem; padding:3px 9px; border-radius:999px;
-    letter-spacing:.03em;
+    display: inline-flex; align-items: center; gap: 3px;
+    background: #FEE2E2; color: #991B1B !important;
+    font-weight: 700; font-size: .78rem; padding: 4px 12px;
+    border-radius: 999px; letter-spacing: .03em;
 }
 
-/* Small uppercase path label */
+/* Uppercase section label */
 .label-sm {
-    font-size:.66rem; font-weight:700; text-transform:uppercase;
-    letter-spacing:.10em; color:#94A3B8 !important; margin-bottom:4px;
-    display:block;
+    font-size: .74rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .10em; color: #94A3B8 !important; margin-bottom: 6px;
+    display: block;
 }
 
 /* Judgment-changed alert bar */
 .alert-changed {
-    background:#FFF7ED; border:1px solid #FED7AA; border-left:4px solid #F97316;
-    border-radius:8px; padding:10px 16px; color:#7C2D12 !important;
-    font-weight:500; font-size:.87rem; margin:0 0 16px 0;
+    background: #FFF7ED; border: 1px solid #FED7AA; border-left: 4px solid #F97316;
+    border-radius: 10px; padding: 14px 20px; color: #7C2D12 !important;
+    font-weight: 500; font-size: .95rem; margin: 0 0 20px 0;
+    display: flex; align-items: center; gap: 10px;
 }
 
-/* Info card (blue) */
+/* Info card */
 .info-card {
-    background:#EFF6FF; border:1px solid #BFDBFE; border-radius:8px;
-    padding:10px 14px; font-size:.84rem; color:#1E3A5F !important;
+    background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 10px;
+    padding: 14px 18px; font-size: .93rem; color: #1E3A5F !important;
+    line-height: 1.65;
 }
 
 /* Model / filter chip */
 .chip {
-    display:inline-block; padding:3px 10px; border-radius:999px;
-    font-size:.73rem; font-weight:600; margin:2px;
+    display: inline-block; padding: 4px 12px; border-radius: 999px;
+    font-size: .82rem; font-weight: 600; margin: 2px;
 }
 
-/* ── Verdict hero (large PASS / FAIL / BORDERLINE) ── */
+/* ── Verdict hero ────────────────────────────────────────────────────────── */
 .verdict-hero {
-    font-size: 2.0rem; font-weight: 900; line-height: 1.1;
-    letter-spacing: -.03em; margin-bottom: 2px;
+    font-size: 2.3rem; font-weight: 900; line-height: 1.1;
+    letter-spacing: -.03em; margin-bottom: 4px;
 }
 .verdict-pass       { color: #059669 !important; }
 .verdict-fail       { color: #DC2626 !important; }
 .verdict-borderline { color: #D97706 !important; }
 .verdict-unknown    { color: #94A3B8 !important; }
 
-/* Verdict card container */
+/* Verdict card */
 .verdict-card {
-    background: #fff; border: 1px solid #E2E8F0; border-radius: 12px;
-    padding: 18px 20px; box-shadow: 0 1px 4px rgba(15,23,42,.05);
-    margin-bottom: 12px;
+    background: #fff; border: 1px solid #E2E8F0; border-radius: 14px;
+    padding: 22px 26px; box-shadow: 0 2px 8px rgba(15,23,42,.06);
+    margin-bottom: 14px;
 }
 
 /* Confidence chips */
-.conf-high   { display:inline-block; background:#D1FAE5; color:#065F46 !important; font-size:.66rem; font-weight:700; padding:2px 8px; border-radius:999px; letter-spacing:.04em; }
-.conf-medium { display:inline-block; background:#FEF3C7; color:#92400E !important; font-size:.66rem; font-weight:700; padding:2px 8px; border-radius:999px; letter-spacing:.04em; }
-.conf-low    { display:inline-block; background:#FEE2E2; color:#991B1B !important; font-size:.66rem; font-weight:700; padding:2px 8px; border-radius:999px; letter-spacing:.04em; }
+.conf-high   { display: inline-flex; align-items: center; background: #D1FAE5; color: #065F46 !important; font-size: .74rem; font-weight: 700; padding: 3px 11px; border-radius: 999px; letter-spacing: .04em; }
+.conf-medium { display: inline-flex; align-items: center; background: #FEF3C7; color: #92400E !important; font-size: .74rem; font-weight: 700; padding: 3px 11px; border-radius: 999px; letter-spacing: .04em; }
+.conf-low    { display: inline-flex; align-items: center; background: #FEE2E2; color: #991B1B !important; font-size: .74rem; font-weight: 700; padding: 3px 11px; border-radius: 999px; letter-spacing: .04em; }
 
-/* Secondary score line */
+/* Score secondary */
 .score-secondary {
-    font-size: .95rem; font-weight: 600; color: #64748B !important;
-    margin-top: 4px;
+    font-size: 1.05rem; font-weight: 600; color: #64748B !important;
+    margin-top: 6px; line-height: 1.5;
 }
 
-/* ── Criteria comparison table ── */
+/* ── Criteria comparison table ───────────────────────────────────────────── */
 .crit-table {
-    background: #fff; border: 1px solid #E2E8F0; border-radius: 10px;
-    overflow: hidden; margin: 12px 0;
+    background: #fff; border: 1px solid #E2E8F0; border-radius: 12px;
+    overflow: hidden; margin: 14px 0;
 }
 .crit-header {
     background: #F8FAFC; border-bottom: 2px solid #E2E8F0;
-    padding: 8px 12px; font-size: .68rem; font-weight: 700;
+    padding: 10px 16px; font-size: .75rem; font-weight: 700;
     text-transform: uppercase; letter-spacing: .08em; color: #64748B !important;
 }
 .crit-row {
-    padding: 10px 12px; border-bottom: 1px solid #F1F5F9;
+    padding: 12px 16px; border-bottom: 1px solid #F1F5F9;
     transition: background .1s;
 }
 .crit-row:last-child { border-bottom: none; }
+.crit-row:hover { background: #FAFBFC !important; }
 .crit-name {
-    font-size: .82rem; font-weight: 600; color: #334155 !important;
-    letter-spacing: .01em;
+    font-size: .90rem; font-weight: 600; color: #334155 !important;
+    letter-spacing: .01em; line-height: 1.4;
 }
 .crit-name-changed {
-    font-size: .82rem; font-weight: 700; color: #2563EB !important;
-    letter-spacing: .01em;
+    font-size: .90rem; font-weight: 700; color: #2563EB !important;
+    letter-spacing: .01em; line-height: 1.4;
 }
 
-/* Verdict badges (in criteria table) — solid fill, white text */
+/* Verdict badges (solid fill, white text) */
 .crit-badge {
-    display: inline-flex; align-items: center; gap: 4px;
-    font-size: .72rem; font-weight: 700; padding: 3px 10px;
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: .78rem; font-weight: 700; padding: 4px 13px;
     border-radius: 999px; letter-spacing: .02em; white-space: nowrap;
 }
-.badge-compliant    { background: #059669; color: #fff !important; }
-.badge-minor        { background: #D97706; color: #fff !important; }
-.badge-major        { background: #EA580C; color: #fff !important; }
-.badge-critical     { background: #DC2626; color: #fff !important; }
-.badge-empty        { background: #E2E8F0; color: #64748B !important; }
+.badge-compliant { background: #059669; color: #fff !important; }
+.badge-minor     { background: #D97706; color: #fff !important; }
+.badge-major     { background: #EA580C; color: #fff !important; }
+.badge-critical  { background: #DC2626; color: #fff !important; }
+.badge-empty     { background: #E2E8F0; color: #64748B !important; }
 
-/* ── Improvement items ── */
+/* ── Improvements ────────────────────────────────────────────────────────── */
 .impr-section {
-    background: #fff; border: 1px solid #FDE68A; border-radius: 10px;
-    padding: 12px 16px; margin: 8px 0;
+    background: #fff; border: 1px solid #FDE68A; border-radius: 12px;
+    padding: 18px 22px; margin: 12px 0;
 }
 .impr-section-title {
-    font-size: .72rem; font-weight: 700; text-transform: uppercase;
-    letter-spacing: .08em; color: #92400E !important; margin-bottom: 8px;
+    font-size: .76rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .08em; color: #92400E !important; margin-bottom: 12px;
 }
 .impr-item {
-    display: flex; align-items: flex-start; gap: 8px;
+    display: flex; align-items: flex-start; gap: 10px;
     background: #FFFBEB; border: 1px solid #FDE68A;
-    border-left: 3px solid #F59E0B; border-radius: 6px;
-    padding: 7px 10px; margin: 4px 0;
-    font-size: .83rem; line-height: 1.5; color: #78350F !important;
+    border-left: 4px solid #F59E0B; border-radius: 8px;
+    padding: 10px 14px; margin: 6px 0;
+    font-size: .92rem; line-height: 1.65; color: #78350F !important;
 }
 .impr-item::before {
     content: "→"; color: #F59E0B !important;
-    font-weight: 700; flex-shrink: 0; margin-top: 1px;
+    font-weight: 700; flex-shrink: 0; margin-top: 2px;
 }
 .impr-inline {
-    font-size: .78rem; color: #92400E !important; line-height: 1.4;
-    padding: 4px 8px 4px 10px; margin: 3px 0 3px 4px;
-    border-left: 2px solid #FCD34D; display: block;
+    font-size: .86rem; color: #92400E !important; line-height: 1.55;
+    padding: 5px 10px 5px 14px; margin: 4px 0 4px 6px;
+    border-left: 3px solid #FCD34D; display: block;
 }
 
-/* ── Explanation section ── */
+/* ── Explanation panel ───────────────────────────────────────────────────── */
 .expl-panel {
-    background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px;
-    padding: 14px 16px; font-size: .83rem; line-height: 1.7;
+    background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px;
+    padding: 18px 22px; font-size: .92rem; line-height: 1.9;
     color: #334155 !important;
 }
 .expl-panel strong { color: #0F172A !important; font-weight: 700; }
 
-/* ── Change indicator (⚡) ── */
+/* ── Change indicator (⚡) ──────────────────────────────────────────────── */
 .changed-tag {
     display: inline-block; background: #EFF6FF; color: #2563EB !important;
-    font-size: .65rem; font-weight: 700; padding: 1px 6px;
-    border-radius: 4px; margin-left: 4px; letter-spacing: .03em;
+    font-size: .72rem; font-weight: 700; padding: 2px 8px;
+    border-radius: 5px; margin-left: 6px; letter-spacing: .03em;
+}
+
+/* ── File card in sidebar ────────────────────────────────────────────────── */
+.file-card {
+    background: #1E293B; border-radius: 10px;
+    padding: 10px 14px; margin: 8px 0;
+    border: 1px solid #334155;
+}
+.file-card-title {
+    font-size: .88rem !important; font-weight: 600 !important;
+    color: #E2E8F0 !important; display: block; margin-bottom: 3px;
+}
+.file-card-meta {
+    font-size: .78rem !important; color: #64748B !important;
+    line-height: 1.5;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -659,19 +733,29 @@ def url_to_domain(url: str) -> str:
         return netloc or url
     except: return url
 
-_AX = {"labelFont": "Inter", "titleFont": "Inter", "labelFontSize": 11, "titleFontSize": 11}
+_AX = {"labelFont": "Inter", "titleFont": "Inter", "labelFontSize": 12, "titleFontSize": 12, "labelColor": "#475569", "titleColor": "#334155"}
 
-def _bare(chart, h: int = 260):
+def _bare(chart, h: int = 280):
     """Apply minimal shared styling to a plain (non-faceted) chart."""
     return (
         chart.properties(height=h)
-        .configure_view(strokeOpacity=0)
+        .configure_view(strokeOpacity=0, strokeWidth=0)
         .configure_axis(**_AX)
-        .configure_legend(labelFont="Inter", titleFont="Inter", labelFontSize=11, titleFontSize=11)
+        .configure_legend(
+            labelFont="Inter", titleFont="Inter",
+            labelFontSize=12, titleFontSize=12,
+            labelColor="#475569", titleColor="#334155",
+            padding=8, columnPadding=12,
+        )
     )
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
 st.sidebar.markdown("# 🛡️ Guardrail Explorer")
+st.sidebar.markdown(
+    "<p style='color:#475569;font-size:.82rem;margin-top:-4px;line-height:1.5'>"
+    "Multilingual LLM guardrail evaluation dashboard</p>",
+    unsafe_allow_html=True,
+)
 st.sidebar.markdown("---")
 
 uploaded_files = st.sidebar.file_uploader(
@@ -683,14 +767,27 @@ uploaded_files = st.sidebar.file_uploader(
 
 if not uploaded_files:
     st.markdown("""
-    <div style='max-width:520px;margin:80px auto;text-align:center;'>
-      <div style='font-size:3rem;margin-bottom:12px'>🛡️</div>
-      <h1 style='font-size:1.6rem;color:#0F172A;margin-bottom:10px'>Guardrail Eval Explorer</h1>
-      <p style='color:#64748B;font-size:.95rem;line-height:1.7'>
-        Upload <code>.json</code> output files from your evaluation runs using the sidebar.<br><br>
-        <strong>Single file</strong> — explore scores, scenarios, evidence for one run.<br>
-        <strong>Multiple files</strong> — compare judge models, policies, and languages side by side.
+    <div style='max-width:600px;margin:70px auto;text-align:center;'>
+      <div style='font-size:3.5rem;margin-bottom:18px;line-height:1'>🛡️</div>
+      <h1 style='font-size:1.9rem;color:#0F172A;margin-bottom:12px;letter-spacing:-.02em;border:none;padding:0'>
+        Guardrail Eval Explorer
+      </h1>
+      <p style='color:#64748B;font-size:1.0rem;line-height:1.8;margin-bottom:28px'>
+        Upload <code style='background:#F1F5F9;padding:2px 7px;border-radius:5px;font-size:.93rem'>.json</code>
+        output files from your evaluation runs using the sidebar on the left.
       </p>
+      <div style='display:grid;grid-template-columns:1fr 1fr;gap:14px;text-align:left;margin-top:8px'>
+        <div style='background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:18px 20px'>
+          <div style='font-size:1.4rem;margin-bottom:8px'>📄</div>
+          <div style='font-weight:700;color:#0F172A;font-size:.96rem;margin-bottom:5px'>Single file</div>
+          <div style='color:#64748B;font-size:.88rem;line-height:1.6'>Explore scores, per-criterion verdicts, claim checks, and evidence for one evaluation run.</div>
+        </div>
+        <div style='background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:18px 20px'>
+          <div style='font-size:1.4rem;margin-bottom:8px'>⚖️</div>
+          <div style='font-weight:700;color:#0F172A;font-size:.96rem;margin-bottom:5px'>Multiple files</div>
+          <div style='color:#64748B;font-size:.88rem;line-height:1.6'>Compare judge models, policies, and languages side by side with scatter plots and heatmaps.</div>
+        </div>
+      </div>
     </div>
     """, unsafe_allow_html=True)
     st.stop()
@@ -725,7 +822,7 @@ file_labels: dict[str, str] = {f: _label(f, r) for f, r in raw.items()}
 lc = Counter(file_labels.values())
 for fname in list(file_labels):
     if lc[file_labels[fname]] > 1:
-        file_labels[fname] += f" ({fname[:12]})"
+        file_labels[fname] += f" ({fname[:22]})"
 
 model_list  = list(dict.fromkeys(file_labels.values()))
 model_colors = {m: _PALETTE[i % len(_PALETTE)] for i, m in enumerate(model_list)}
@@ -745,19 +842,26 @@ sel_policies = st.sidebar.multiselect("Policy", all_policies, default=all_polici
 sel_langs    = st.sidebar.multiselect("Language", all_languages, default=all_languages, key="gl")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("**Loaded files**")
+st.sidebar.markdown("### Loaded Files")
 for fname, rows in raw.items():
-    lbl   = file_labels[fname]
-    color = model_colors.get(lbl, "#3B82F6")
-    asst  = rows[0].get("model", "?")
-    # Show web search backend if recorded in the data
+    lbl      = file_labels[fname]
+    color    = model_colors.get(lbl, "#3B82F6")
+    asst     = rows[0].get("model", "?")
     web_tool = rows[0].get("web_search_tool", "")
-    web_badge = f" · 🔍 {web_tool}" if web_tool else ""
+    search_badge = f"🔍 {web_tool}" if web_tool else ""
+    lang_set = sorted({r.get("language","?") for r in rows})
+    langs_str = " · ".join(lang_set) if lang_set else "?"
     st.sidebar.markdown(
-        f'<span class="chip" style="background:{color}22;color:{color};border:1px solid {color}44">{lbl}</span>',
+        f'<div class="file-card">'
+        f'<span class="chip" style="background:{color}33;color:{color};border:1px solid {color}55;font-size:.78rem;padding:2px 9px">{lbl}</span>'
+        f'<div class="file-card-meta" style="margin-top:7px">'
+        f'<span style="font-family:monospace;font-size:.76rem;color:#475569">{fname[:36]}{"…" if len(fname)>36 else ""}</span><br>'
+        f'{len(rows)} scenarios &nbsp;·&nbsp; {langs_str}'
+        f'{"&nbsp;·&nbsp;" + search_badge if search_badge else ""}'
+        f'<br><span style="color:#475569">asst: {asst}</span>'
+        f'</div></div>',
         unsafe_allow_html=True,
     )
-    st.sidebar.caption(f"`{fname}`  \n{len(rows)} scenarios · asst: {asst}{web_badge}")
 
 # ── UNIFIED FLAT DATAFRAME ─────────────────────────────────────────────────────
 records = []
@@ -778,7 +882,7 @@ for fname, rows in raw.items():
             records.append({
                 "file": fname, "model": model,
                 "id": str(row.get("id", "")), "language": lang, "policy": pol,
-                "scenario": str(row.get("scenario", ""))[:72],
+                "scenario": str(row.get("scenario", ""))[:100],
                 "na_score": na, "ag_score": ag, "delta": dlt,
                 "judgment_changed": changed, "tool_calls": tc,
                 "na_valid": (na > _VALID_THRESHOLD) if na is not None else None,
@@ -812,15 +916,15 @@ with tab_summary:
     n_changed = int(df["judgment_changed"].sum())
 
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Files loaded",        len(raw))
-    k2.metric("Unique scenarios",    df["id"].nunique())
-    k3.metric("Non-ag pass rate",
+    k1.metric("Files", len(raw))
+    k2.metric("Scenarios", df["id"].nunique())
+    k3.metric("Pass — Non-agentic",
               f"{100*sum(1 for s in na_vals if s>_VALID_THRESHOLD)/len(na_vals):.0f}%" if na_vals else "—")
-    k4.metric("Agentic pass rate",
+    k4.metric("Pass — Agentic",
               f"{100*sum(1 for s in ag_vals if s>_VALID_THRESHOLD)/len(ag_vals):.0f}%" if ag_vals else "—",
               delta=f"{(100*sum(1 for s in ag_vals if s>_VALID_THRESHOLD)/len(ag_vals)) - (100*sum(1 for s in na_vals if s>_VALID_THRESHOLD)/len(na_vals)):+.0f}pp" if na_vals and ag_vals else None)
-    k5.metric("Judgments flipped",   f"{n_changed:,}",
-              help="Scenarios where agentic changed the pass/fail verdict")
+    k5.metric("Verdicts Flipped",   f"{n_changed:,}",
+              help="Scenarios where agentic tool access changed the pass/fail verdict")
 
     st.markdown("---")
 
@@ -966,7 +1070,7 @@ with tab_compare:
                      alt.Tooltip("delta:Q",    format="+.3f"),
                      "judgment_changed:N"],
         )
-        st.altair_chart(_bare(diag_ln + thresh_h + thresh_v + scatter, 320), use_container_width=True)
+        st.altair_chart(_bare(diag_ln + thresh_h + thresh_v + scatter, 380), use_container_width=True)
     else:
         st.info("No scenarios with both non-agentic and agentic scores in the current filter.")
 
@@ -1017,7 +1121,7 @@ with tab_compare:
         df_h["row_label"] = (
             "[" + df_h["id"].astype(str) + "] "
             + df_h["language"] + " · "
-            + df_h["scenario"].str[:38] + "…"
+            + df_h["scenario"].str[:58] + "…"
         )
         df_h["score_val"] = df_h[score_col]
 
@@ -1121,7 +1225,7 @@ with tab_inspect:
         na_s = r.get("na_score"); ag_s = r.get("ag_score"); d = r.get("delta")
         tbl.append({
             "ID": r["id"], "Lang": r["language"], "Model": r["model"], "Policy": r["policy"],
-            "Scenario": r["scenario"][:68],
+            "Scenario": r["scenario"][:100],
             "Non-ag": round(na_s, 3) if na_s is not None else None,
             "✓ non-ag": fmt_valid(score_to_valid(na_s)),
             "Agentic": round(ag_s, 3) if ag_s is not None else None,
@@ -1144,18 +1248,19 @@ with tab_inspect:
 
     st.dataframe(
         df_tbl.style.apply(_hl, axis=1).map(_cs, subset=["Non-ag","Agentic"]),
-        use_container_width=True, height=300,
+        use_container_width=True, height=440,
     )
 
     st.markdown("---")
-    st.markdown("### Single scenario deep-dive")
+    st.markdown("### Single Scenario Deep-Dive")
+    st.caption("Select a scenario and file below to see the full judgment — verdicts, criteria breakdown, claim checks, and evidence.")
 
     dc1, dc2, dc3 = st.columns([3, 2, 2])
     with dc1:
         all_ids = sorted(df["id"].unique())
         sel_sid = st.selectbox(
             "Scenario ID", all_ids,
-            format_func=lambda s: f"[{s}] {df[df['id']==s]['scenario'].iloc[0][:52]}…" if not df[df['id']==s].empty else s,
+            format_func=lambda s: f"[{s}] {df[df['id']==s]['scenario'].iloc[0][:70]}…" if not df[df['id']==s].empty else s,
             key="ds",
         )
     with dc2:
@@ -1175,9 +1280,9 @@ with tab_inspect:
         # Scenario + Response
         s1, s2 = st.columns(2)
         with s1:
-            st.markdown('<p class="label-sm">Scenario</p>', unsafe_allow_html=True)
+            st.markdown('<p class="label-sm">User Scenario</p>', unsafe_allow_html=True)
             st.info(det.get("scenario","—"))
-            st.caption(f"Language: **{det.get('language','?')}** · ID: {det.get('id','?')}")
+            st.caption(f"Language: **{det.get('language','?')}** &nbsp;·&nbsp; ID: `{det.get('id','?')}`")
         with s2:
             st.markdown('<p class="label-sm">Assistant Response</p>', unsafe_allow_html=True)
             st.success(det.get("assistant_response","—"))
