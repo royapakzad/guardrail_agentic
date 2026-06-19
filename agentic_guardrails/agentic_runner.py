@@ -39,7 +39,8 @@ from typing import TYPE_CHECKING, Optional
 
 from any_llm import completion as _completion
 
-from tools import TOOL_SCHEMAS, dispatch_tool_call, check_url_validity, check_acronym
+from llm_gateway import resolve_completion_kwargs  # PR #14
+from tools import get_tool_schemas, dispatch_tool_call, check_url_validity, check_acronym  # PR #15
 from guardrails_runner import SHARED_SEVERITY_ANCHORS
 
 if TYPE_CHECKING:
@@ -130,11 +131,19 @@ def _prerun_url_checks_parallel(assistant_response: str) -> tuple[list[dict], st
     lines = ["PRE-CHECKED URLS (do NOT call check_url_validity for these):"]
     for r in ordered:
         status = r.get("status_code", "ERR")
-        valid  = r.get("valid", False)
-        tag    = "✓ valid" if valid else "✗ BROKEN"
+        valid = r.get("valid")
+        timed_out = r.get("timed_out", False)
+        if timed_out:
+            tag = "⚠ TIMED OUT (could not verify — do NOT deduct)"
+        elif valid:
+            tag = "✓ valid"
+        else:
+            tag = "✗ BROKEN"
         lines.append(f"  {r['url']} → HTTP {status} ({tag})")
     lines.append(
-        "Apply −0.15 deduction per BROKEN URL to the factuality criterion. "
+        "Apply −0.15 deduction per BROKEN URL (valid=False) to the factuality criterion. "
+        "URLs marked TIMED OUT have valid=None — treat as unverifiable, NOT broken. "
+        "Do NOT deduct for timed-out URLs. "
         "Use your remaining tool budget for claim verification and acronym checks only."
     )
 
@@ -303,8 +312,10 @@ def _summarize_tool_result(tool_name: str, args: dict, result_str: str) -> str:
 
     if tool_name == "fetch_url":
         content = data.get("content", "")
-        preview = content[:200].replace("\n", " ")
-        return f"fetch_url('{args.get('url','')}'): {len(content)} chars — {preview}"
+        # PR #16: return full clean text so the judge reads the actual source,
+        # not a 200-char preview of boilerplate. Content is already capped at
+        # MAX_FETCH_CHARS (4000) by _fetch_main_text.
+        return f"fetch_url('{args.get('url','')}'): {len(content)} chars\n{content}"
 
     if tool_name == "check_url_validity":
         valid  = data.get("valid", False)
@@ -791,6 +802,7 @@ def run_agentic_guardrail(
     user_message: str,
     assistant_response: str,
     max_tool_calls: int = MAX_TOOL_CALLS,
+    tool_group: str = "default",  # PR #15: selectable tool group
     verbose: bool = False,
     logger: "Optional[ScenarioLogger]" = None,
     policy_label: str = "",
@@ -886,18 +898,19 @@ def run_agentic_guardrail(
             if verbose:
                 print("      [cap reached — injecting conclusion prompt]")
 
+        # PR #14: resolve gateway overrides (empty dict in direct mode)
+        gateway_overrides = resolve_completion_kwargs(provider, guardrail_model)
         call_kwargs: dict = dict(
             provider=provider.lower(),
             model=guardrail_model,
             messages=messages,
         )
+        call_kwargs.update(gateway_overrides)
         if tool_choice != "none":
-            call_kwargs["tools"] = TOOL_SCHEMAS
+            call_kwargs["tools"] = get_tool_schemas(tool_group)  # PR #15
             call_kwargs["tool_choice"] = tool_choice
             # Force one tool call per turn for both OpenAI and Anthropic.
-            # OpenAI (including gpt-5-nano) returns all N tool calls at once when
-            # parallel_tool_calls is True, exhausting the cap in a single turn.
-            # Anthropic requires this flag to avoid SDK translation bugs.
+            # parallel_tool_calls still keys off the original provider (pre-gateway).
             if provider.lower() in ("openai", "anthropic"):
                 call_kwargs["parallel_tool_calls"] = False
 

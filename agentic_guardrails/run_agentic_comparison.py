@@ -54,15 +54,9 @@ import time
 import warnings
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
-# Suppress a harmless Pydantic serialization warning produced by any-guardrail 0.2.2
-# when used with openai>=2.x. The warning fires because the newer OpenAI SDK populates
-# a `parsed` field that any-guardrail's internal model declares as None. Results are
-# unaffected — the GuardrailOutput is captured correctly before serialization runs.
-warnings.filterwarnings(
-    "ignore",
-    message=".*PydanticSerializationUnexpectedValue.*parsed.*",
-    category=UserWarning,
-)
+# PR #12/#13: the PydanticSerializationUnexpectedValue filter for any-guardrail 0.2.2
+# has been removed. AnyLlmAdapter no longer calls guardrail.validate() at all, so the
+# warning can no longer fire.
 
 from dotenv import load_dotenv
 
@@ -289,6 +283,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Maximum tool invocations per agentic evaluation (default: 5).",
     )
     p.add_argument(
+        "--tool-group",
+        default="default",
+        help=(
+            "Tool group for the agentic guardrail (default: default). "
+            "Must match a key in tools.TOOL_GROUPS. Typos fail fast at startup."
+        ),
+    )
+    p.add_argument(
         "--verbose",
         action="store_true",
         help="Print tool calls and search results in real time.",
@@ -309,6 +311,7 @@ def process_row(
     rubric: str,
     max_tool_calls: int,
     web_search_tool: str = "duckduckgo",
+    tool_group: str = "default",  # PR #15
     verbose: bool = False,
     log_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -371,10 +374,11 @@ def process_row(
             "model": assistant_model,
             "assistant_system_prompt": assistant_system_prompt,
             "assistant_response": assistant_response,
-            "guardrail_backend": type(guardrail).__name__,
+            "guardrail_backend": guardrail.backend_name,  # PR #11: canonical name
             "guardrail_judges": [j.model_id for j in judges],
             "max_tool_calls_allowed": max_tool_calls,
             "web_search_tool": web_search_tool,
+            "tool_group": tool_group,  # PR #15
         }
     )
 
@@ -487,6 +491,7 @@ def process_row(
                     user_message=scenario,
                     assistant_response=assistant_response,
                     max_tool_calls=max_tool_calls,
+                    tool_group=tool_group,  # PR #15
                     verbose=verbose,
                     logger=logger,
                     nonagentic_hints=na_hints,
@@ -591,10 +596,17 @@ def main() -> None:
     args = parser.parse_args()
 
     # ---- Configure web search backend for agentic tools --------------------
-    # Must be done before any tool calls; all workers share the module-level state.
     import tools as _tools_mod
     _tools_mod.set_search_backend(args.web_search_tool)
     print(f"Web search backend: {args.web_search_tool.upper()}")
+
+    # ---- Validate tool group (PR #15) --------------------------------------
+    if args.tool_group not in _tools_mod.TOOL_GROUPS:
+        valid_groups = ", ".join(sorted(_tools_mod.TOOL_GROUPS))
+        parser.error(
+            f"Unknown --tool-group {args.tool_group!r}. Valid groups: {valid_groups}"
+        )
+    print(f"Tool group: {args.tool_group}")
 
     # ---- Load shared text configs -------------------------------------------
     # These files are read once and passed to every row's evaluation.
@@ -739,6 +751,7 @@ def main() -> None:
                 rubric=rubric,
                 max_tool_calls=args.max_tool_calls,
                 web_search_tool=args.web_search_tool,
+                tool_group=args.tool_group,  # PR #15
                 verbose=args.verbose,
                 log_dir=log_dir,
             )

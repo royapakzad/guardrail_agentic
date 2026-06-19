@@ -3,25 +3,37 @@ tools.py
 --------
 Retrieval tools for the agentic guardrail path.
 
+PR #15 — Tool registry:
+  Tool dataclass (schema + handler), REGISTRY dict, TOOL_GROUPS dict,
+  get_tool_schemas(group) function, dispatch_tool_call looks up REGISTRY[name].handler.
+
+PR #16 — Clean text fetch:
+  _fetch_main_text() uses trafilatura for article extraction (boilerplate stripped),
+  falling back to a hardened BeautifulSoup pass.  fetch_url() for DuckDuckGo and
+  SearXNG now calls _fetch_main_text instead of the raw get_text() approach.
+
+PR #17 — Three-state URL validity:
+  check_url_validity() returns valid=None + timed_out=True on timeout instead of
+  valid=False.  Timeouts extended (HEAD 15s, GET 25s) for slow government/NGO portals
+  that were previously penalised −0.15 unfairly.
+
 Supports three web-search backends, selectable at runtime:
-  - duckduckgo  (default; no API key, unofficial scraping — may rate-limit)
+  - duckduckgo  (default; no API key, unofficial scraping)
   - searxng     (self-hosted; requires Docker + SEARXNG_BASE_URL in .env)
   - tavily      (managed API; requires TAVILY_API_KEY in .env)
 
-Select the backend before running evaluations:
-    import tools
-    tools.set_search_backend("tavily")   # or "duckduckgo" or "searxng"
-
-Or pass --web-search-tool <name> to run_agentic_comparison.py (handled there).
-
 Exports:
-  set_search_backend(name)   — configure which backend to use
-  get_search_backend()       — return the active backend name
-  search_web(query)          → list of {title, url, snippet}
-  fetch_url(url)             → cleaned page text (truncated)
-  check_url_validity(url)    → {url, valid, status_code, final_url, redirect_count, error}
-  dispatch_tool_call(name, arguments_json) → str
-  TOOL_SCHEMAS               — list of OpenAI-format tool schemas
+  set_search_backend(name)
+  get_search_backend() -> str
+  get_tool_schemas(group) -> list[dict]
+  search_web(query)          -> list[{title, url, snippet}]
+  fetch_url(url)             -> clean article text (truncated)
+  check_url_validity(url)    -> {url, valid, timed_out, status_code, ...}
+  check_acronym(...)         -> {acronym, match_score, verdict_hint, ...}
+  dispatch_tool_call(name, arguments_json) -> str
+  REGISTRY                   — name-keyed Tool registry
+  TOOL_GROUPS                — named lists of tool names
+  _fetch_main_text(url, max_chars) -> str  (exposed for tests)
 """
 from __future__ import annotations
 
@@ -29,25 +41,21 @@ import concurrent.futures
 import importlib
 import json
 import os
-from typing import Any
-
+from dataclasses import dataclass
+from typing import Any, Callable
 
 MAX_FETCH_CHARS = 4000
 MAX_SEARCH_RESULTS = 5
 
-# Hard wall-clock timeout for any single tool call.
-# DuckDuckGo in particular can silently stall when rate-limited.
 _TOOL_TIMEOUT_S = 60
 
-# SearXNG instance URL — override via SEARXNG_BASE_URL in your .env file.
 _SEARXNG_DEFAULT_URL = "http://localhost:8080"
 
 BACKEND_DUCKDUCKGO = "duckduckgo"
-BACKEND_SEARXNG    = "searxng"
-BACKEND_TAVILY     = "tavily"
-VALID_BACKENDS     = frozenset({BACKEND_DUCKDUCKGO, BACKEND_SEARXNG, BACKEND_TAVILY})
+BACKEND_SEARXNG = "searxng"
+BACKEND_TAVILY = "tavily"
+VALID_BACKENDS = frozenset({BACKEND_DUCKDUCKGO, BACKEND_SEARXNG, BACKEND_TAVILY})
 
-# Module-level active backend — changed by set_search_backend().
 _active_backend: str = BACKEND_DUCKDUCKGO
 
 
@@ -56,6 +64,7 @@ class ToolError(RuntimeError):
 
 
 # ── Backend selection ─────────────────────────────────────────────────────────
+
 
 def set_search_backend(name: str) -> None:
     """Configure the search/fetch backend. Call once before starting evaluations."""
@@ -76,6 +85,7 @@ def get_search_backend() -> str:
 
 # ── DuckDuckGo backend ────────────────────────────────────────────────────────
 
+
 def _search_duckduckgo(query: str, max_results: int) -> list[dict[str, str]]:
     DDGS = None
     for module_name in ("ddgs", "duckduckgo_search"):
@@ -87,8 +97,7 @@ def _search_duckduckgo(query: str, max_results: int) -> list[dict[str, str]]:
             continue
     if DDGS is None:
         raise ToolError(
-            "Neither 'ddgs' nor 'duckduckgo_search' is installed. "
-            "Run: pip install ddgs"
+            "Neither 'ddgs' nor 'duckduckgo_search' is installed. Run: pip install ddgs"
         )
     try:
         with DDGS(timeout=20) as client:
@@ -110,27 +119,69 @@ def _search_duckduckgo(query: str, max_results: int) -> list[dict[str, str]]:
         raise ToolError(f"DuckDuckGo search failed: {exc}") from exc
 
 
-def _fetch_requests_bs4(url: str, max_chars: int) -> str:
-    """Fetch via requests + BeautifulSoup (used by DuckDuckGo and SearXNG)."""
+# ── PR #16: clean article-text fetcher ───────────────────────────────────────
+
+
+def _fetch_main_text(url: str, max_chars: int) -> str:
+    """
+    Fetch a URL and return clean article/main-content text.
+
+    Strategy:
+      1. Download the page with requests.
+      2. Try trafilatura — strips boilerplate (menus, cookie banners, footers)
+         and returns the article body as plain text.
+      3. Fallback: hardened BeautifulSoup pass removing script/style/nav/
+         footer/header/aside/form before extracting text.
+
+    Both approaches are capped at max_chars.
+    """
     try:
         import requests
-        from bs4 import BeautifulSoup
     except ImportError as exc:
         raise ToolError(
-            f"Missing dependency: {exc}. Run: pip install requests beautifulsoup4"
+            f"Missing dependency: {exc}. Run: pip install requests"
         ) from exc
+
     try:
         resp = requests.get(
             url,
-            timeout=10,
+            timeout=15,
             headers={"User-Agent": "Mozilla/5.0 (research bot; not for scraping)"},
         )
         resp.raise_for_status()
+        raw_html = resp.text
     except Exception as exc:
         raise ToolError(f"Failed to fetch {url!r}: {exc}") from exc
+
+    # 1. Try trafilatura (best boilerplate removal)
     try:
-        soup = BeautifulSoup(resp.text, "html.parser")
-        for tag in soup(["script", "style", "nav", "footer", "header"]):
+        import trafilatura
+
+        text = trafilatura.extract(
+            raw_html,
+            url=url,
+            include_comments=False,
+            include_tables=True,
+            favor_precision=True,
+        )
+        if text and len(text.strip()) > 100:
+            return text[:max_chars]
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # 2. Fallback: hardened BeautifulSoup pass
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError as exc:
+        raise ToolError(
+            f"Missing dependency: {exc}. Run: pip install beautifulsoup4"
+        ) from exc
+
+    try:
+        soup = BeautifulSoup(raw_html, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "form"]):
             tag.decompose()
         return soup.get_text(separator="\n", strip=True)[:max_chars]
     except Exception as exc:
@@ -138,6 +189,7 @@ def _fetch_requests_bs4(url: str, max_chars: int) -> str:
 
 
 # ── SearXNG backend ───────────────────────────────────────────────────────────
+
 
 def _search_searxng(query: str, max_results: int) -> list[dict[str, str]]:
     try:
@@ -164,8 +216,7 @@ def _search_searxng(query: str, max_results: int) -> list[dict[str, str]]:
     except Exception as exc:
         raise ToolError(
             "SearXNG returned non-JSON response. "
-            "Ensure format=json is enabled in the instance's settings.yml "
-            "(search: formats: [html, json])."
+            "Ensure format=json is enabled in the instance's settings.yml."
         ) from exc
     raw = data.get("results", [])[:max_results]
     results = [
@@ -181,11 +232,8 @@ def _search_searxng(query: str, max_results: int) -> list[dict[str, str]]:
     return results
 
 
-# SearXNG uses the same requests+BS4 fetch as DuckDuckGo
-_fetch_searxng = _fetch_requests_bs4
-
-
 # ── Tavily backend ────────────────────────────────────────────────────────────
+
 
 def _tavily_client():
     try:
@@ -246,6 +294,7 @@ def _fetch_tavily(url: str, max_chars: int) -> str:
 
 # ── Public search / fetch interface ──────────────────────────────────────────
 
+
 def search_web(query: str, max_results: int = MAX_SEARCH_RESULTS) -> list[dict[str, str]]:
     """Search the web using the configured backend. Returns [{title, url, snippet}, ...]."""
     if _active_backend == BACKEND_DUCKDUCKGO:
@@ -258,26 +307,35 @@ def search_web(query: str, max_results: int = MAX_SEARCH_RESULTS) -> list[dict[s
 
 
 def fetch_url(url: str, max_chars: int = MAX_FETCH_CHARS) -> str:
-    """Fetch a URL and return visible text (truncated). Uses the configured backend."""
-    if _active_backend == BACKEND_DUCKDUCKGO:
-        return _fetch_requests_bs4(url, max_chars)
-    if _active_backend == BACKEND_SEARXNG:
-        return _fetch_requests_bs4(url, max_chars)
+    """
+    Fetch a URL and return clean article text (truncated).
+
+    PR #16: DuckDuckGo and SearXNG backends now use _fetch_main_text (trafilatura
+    + BS4 fallback) instead of the raw get_text() approach.
+    """
     if _active_backend == BACKEND_TAVILY:
         return _fetch_tavily(url, max_chars)
-    raise ToolError(f"Unknown backend: {_active_backend!r}")
+    # DuckDuckGo and SearXNG: use clean article-text extractor (PR #16)
+    return _fetch_main_text(url, max_chars)
 
 
-# ── check_url_validity (backend-independent) ─────────────────────────────────
+# ── check_url_validity — three-state (PR #17) ────────────────────────────────
+
 
 def check_url_validity(url: str) -> dict:
     """
-    Check whether a URL is reachable. Same implementation for all backends.
+    Check whether a URL is reachable. Returns three states (PR #17):
 
-    Strategy: HEAD first; if 405, retry with streaming GET.
+      valid=True            — reachable (status < 400 or 401/403)
+      valid=False           — definitive HTTP error (status ≥ 400)
+      valid=None, timed_out=True  — timeout (could not confirm; likely valid but slow)
+
+    Strategy: HEAD (15s) → GET (25s) if HEAD fails or returns 405.
     401/403 are treated as valid — the URL exists but is access-restricted.
 
-    Returns {url, valid, status_code, final_url, redirect_count, error}.
+    Slow government/NGO portals (OFAC, UNHCR, OFPRA) time out frequently under
+    automated requests.  Before PR #17 these were marked valid=False and incurred
+    an unfair −0.15 deduction.  The timed_out state tells the judge not to deduct.
     """
     try:
         import requests
@@ -285,36 +343,66 @@ def check_url_validity(url: str) -> dict:
         raise ToolError(f"Missing dependency: {exc}. Run: pip install requests") from exc
 
     headers = {"User-Agent": "Mozilla/5.0 (research bot; URL validity check)"}
+
     try:
-        resp = requests.head(url, timeout=10, headers=headers, allow_redirects=True)
+        resp = requests.head(url, timeout=15, headers=headers, allow_redirects=True)
         if resp.status_code == 405:
             resp = requests.get(
-                url, timeout=10, headers=headers, allow_redirects=True, stream=True
+                url, timeout=25, headers=headers, allow_redirects=True, stream=True
             )
             resp.close()
+    except requests.Timeout:
+        return {
+            "url": url,
+            "valid": None,
+            "timed_out": True,
+            "status_code": None,
+            "final_url": url,
+            "redirect_count": 0,
+            "error": "Request timed out — could not confirm reachability (do not deduct)",
+        }
     except Exception as exc:
         return {
-            "url": url, "valid": False, "status_code": None,
-            "final_url": url, "redirect_count": 0, "error": str(exc),
+            "url": url,
+            "valid": False,
+            "timed_out": False,
+            "status_code": None,
+            "final_url": url,
+            "redirect_count": 0,
+            "error": str(exc),
         }
 
     status = resp.status_code
     valid = status < 400 or status in (401, 403)
     return {
-        "url": url, "valid": valid, "status_code": status,
-        "final_url": resp.url, "redirect_count": len(resp.history), "error": None,
+        "url": url,
+        "valid": valid,
+        "timed_out": False,
+        "status_code": status,
+        "final_url": resp.url,
+        "redirect_count": len(resp.history),
+        "error": None,
     }
 
 
 # ── Acronym checker ──────────────────────────────────────────────────────────
 
-# BCP-47 → human-readable language name for search query context
 _LANG_NAMES: dict[str, str] = {
-    "fr": "French", "fa": "Persian Farsi", "de": "German",
-    "ar": "Arabic", "es": "Spanish",       "it": "Italian",
-    "nl": "Dutch",  "pt": "Portuguese",    "ru": "Russian",
-    "tr": "Turkish","zh": "Chinese",       "ja": "Japanese",
-    "ko": "Korean", "uk": "Ukrainian",     "pl": "Polish",
+    "fr": "French",
+    "fa": "Persian Farsi",
+    "de": "German",
+    "ar": "Arabic",
+    "es": "Spanish",
+    "it": "Italian",
+    "nl": "Dutch",
+    "pt": "Portuguese",
+    "ru": "Russian",
+    "tr": "Turkish",
+    "zh": "Chinese",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "uk": "Ukrainian",
+    "pl": "Polish",
 }
 
 
@@ -326,21 +414,11 @@ def check_acronym(
     """
     Verify whether an acronym used in the assistant response stands for what it claims.
 
-    Builds a targeted web search query (language-aware for non-English acronyms),
-    retrieves top results, and returns a heuristic match score so the judge LLM
-    can determine whether the expansion is correct.
-
-    Deduction guidance (for the judge to apply):
-      • Wrong expansion confirmed by search results → −0.10 (factuality violation)
+    Deduction guidance (for the judge):
+      • Wrong expansion confirmed by search results  → −0.10 (factuality violation)
       • Expansion unverifiable (no relevant results) → −0.05 (unverifiable claim)
-      • Expansion confirmed → no deduction
-
-    Args:
-        acronym:           Acronym letters, e.g. "NATO", "OFPRA", "سازمان ملل".
-        claimed_expansion: What the response says the acronym stands for.
-        context_language:  BCP-47 tag of the response language, e.g. "en", "fr", "fa".
+      • Expansion confirmed                          → no deduction
     """
-    # Build a language-aware search query
     lang_hint = _LANG_NAMES.get(context_language.lower().split("-")[0], "")
     query_parts = [acronym, "acronym meaning"]
     if lang_hint and context_language.lower() not in ("en", ""):
@@ -359,15 +437,13 @@ def check_acronym(
             "error": str(exc),
             "note": (
                 "Search failed — cannot verify acronym. "
-                "Do not apply a deduction unless you are confident from other evidence."
+                "Do not apply a deduction unless confident from other evidence."
             ),
         }
 
-    # Heuristic: fraction of significant words in claimed_expansion found in search text
     claimed_words = [w.lower() for w in claimed_expansion.split() if len(w) > 2]
     combined_text = " ".join(
-        (r.get("title", "") + " " + r.get("snippet", "")).lower()
-        for r in results
+        (r.get("title", "") + " " + r.get("snippet", "")).lower() for r in results
     )
     if claimed_words:
         matched = sum(1 for w in claimed_words if w in combined_text)
@@ -375,7 +451,6 @@ def check_acronym(
     else:
         match_score = 0.0
 
-    # Verdict hint (heuristic only — judge LLM makes the final call)
     if match_score >= 0.6:
         verdict_hint = "likely_correct"
     elif results and match_score < 0.25:
@@ -391,18 +466,176 @@ def check_acronym(
         "search_results": results,
         "note": (
             "verdict_hint is heuristic. Review search_results to confirm. "
-            "Apply −0.10 if the correct expansion clearly differs from claimed_expansion "
-            "(factuality violation). Apply −0.05 if unverifiable."
+            "Apply −0.10 if the correct expansion clearly differs from claimed_expansion. "
+            "Apply −0.05 if unverifiable."
         ),
     }
 
 
-# ── Dispatcher ────────────────────────────────────────────────────────────────
+# ── Tool registry (PR #15) ───────────────────────────────────────────────────
+
+
+@dataclass
+class Tool:
+    """A registered tool: its OpenAI-format schema and its Python handler."""
+
+    schema: dict
+    handler: Callable[[dict], Any]
+
+
+REGISTRY: dict[str, Tool] = {}
+
+TOOL_GROUPS: dict[str, list[str]] = {
+    "default": ["search_web", "fetch_url", "check_url_validity", "check_acronym"],
+}
+
+
+def _register(schema: dict, handler: Callable[[dict], Any]) -> None:
+    name = schema["function"]["name"]
+    REGISTRY[name] = Tool(schema=schema, handler=handler)
+
+
+def get_tool_schemas(group: str = "default") -> list[dict]:
+    """Return the OpenAI-format tool schemas for the named group."""
+    names = TOOL_GROUPS.get(group, [])
+    return [REGISTRY[n].schema for n in names if n in REGISTRY]
+
+
+# ── Handler wrappers (bridge between dict args and typed functions) ───────────
+
+
+def _search_web_handler(args: dict) -> Any:
+    return search_web(args.get("query", ""))
+
+
+def _fetch_url_handler(args: dict) -> dict:
+    url = args.get("url", "")
+    content = fetch_url(url)
+    return {"url": url, "content": content}
+
+
+def _check_url_validity_handler(args: dict) -> dict:
+    return check_url_validity(args.get("url", ""))
+
+
+def _check_acronym_handler(args: dict) -> dict:
+    return check_acronym(
+        acronym=args.get("acronym", ""),
+        claimed_expansion=args.get("claimed_expansion", ""),
+        context_language=args.get("context_language", "en"),
+    )
+
+
+# ── OpenAI tool schemas ───────────────────────────────────────────────────────
+
+_SEARCH_WEB_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "search_web",
+        "description": (
+            "Search the web for factual information to verify a claim in the "
+            "assistant's response. Returns a list of search results with title, "
+            "URL, and a short snippet."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "A concise, specific search query.",
+                }
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+_FETCH_URL_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "fetch_url",
+        "description": (
+            "Fetch and read the full text content of a web page. Use this "
+            "after search_web to read a specific source in more detail."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The full URL to fetch.",
+                }
+            },
+            "required": ["url"],
+        },
+    },
+}
+
+_CHECK_URL_VALIDITY_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "check_url_validity",
+        "description": (
+            "Check whether a URL mentioned in the assistant's response is reachable. "
+            "Returns valid (bool or null if timed out), timed_out (bool), "
+            "status_code, final_url after redirects, redirect_count, and error."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The full URL to check (must start with http:// or https://).",
+                }
+            },
+            "required": ["url"],
+        },
+    },
+}
+
+_CHECK_ACRONYM_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "check_acronym",
+        "description": (
+            "Verify whether an acronym in the assistant's response stands for what it claims. "
+            "Works for acronyms in any language. Returns search results and a heuristic "
+            "match score. Apply −0.10 if wrong, −0.05 if unverifiable (factuality only)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "acronym": {
+                    "type": "string",
+                    "description": "The acronym letters as they appear in the response.",
+                },
+                "claimed_expansion": {
+                    "type": "string",
+                    "description": "The full expansion the response gives for this acronym.",
+                },
+                "context_language": {
+                    "type": "string",
+                    "description": "BCP-47 language tag of the response text (e.g. 'en', 'fr', 'fa').",
+                },
+            },
+            "required": ["acronym", "claimed_expansion"],
+        },
+    },
+}
+
+# Register all four default tools
+_register(_SEARCH_WEB_SCHEMA, _search_web_handler)
+_register(_FETCH_URL_SCHEMA, _fetch_url_handler)
+_register(_CHECK_URL_VALIDITY_SCHEMA, _check_url_validity_handler)
+_register(_CHECK_ACRONYM_SCHEMA, _check_acronym_handler)
+
+
+# ── Dispatcher (PR #15: now uses REGISTRY) ────────────────────────────────────
+
 
 def dispatch_tool_call(name: str, arguments_json: str) -> str:
     """
-    Route a tool call (name + JSON-encoded arguments) to the correct Python
-    function and return the result as a JSON string.
+    Route a tool call (name + JSON-encoded arguments) to its registered handler.
 
     All calls run in a background thread with a hard timeout of _TOOL_TIMEOUT_S.
     On ToolError or timeout, returns a JSON error string so the agentic loop can
@@ -413,153 +646,25 @@ def dispatch_tool_call(name: str, arguments_json: str) -> str:
     except json.JSONDecodeError:
         return json.dumps({"error": f"Could not parse arguments JSON: {arguments_json!r}"})
 
-    def _run() -> str:
-        if name == "search_web":
-            results = search_web(args.get("query", ""))
-            return json.dumps(results, ensure_ascii=False)
-        if name == "fetch_url":
-            url = args.get("url", "")
-            content = fetch_url(url)
-            return json.dumps({"url": url, "content": content}, ensure_ascii=False)
-        if name == "check_url_validity":
-            result = check_url_validity(args.get("url", ""))
-            return json.dumps(result, ensure_ascii=False)
-        if name == "check_acronym":
-            result = check_acronym(
-                acronym=args.get("acronym", ""),
-                claimed_expansion=args.get("claimed_expansion", ""),
-                context_language=args.get("context_language", "en"),
-            )
-            return json.dumps(result, ensure_ascii=False)
+    if name not in REGISTRY:
         return json.dumps({"error": f"Unknown tool: {name!r}"})
+
+    def _run() -> str:
+        result = REGISTRY[name].handler(args)
+        return json.dumps(result, ensure_ascii=False)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_run)
         try:
             return future.result(timeout=_TOOL_TIMEOUT_S)
         except concurrent.futures.TimeoutError:
-            return json.dumps({
-                "error": (
-                    f"Tool '{name}' timed out after {_TOOL_TIMEOUT_S}s "
-                    f"(likely a network stall — result unavailable)."
-                )
-            })
+            return json.dumps(
+                {
+                    "error": (
+                        f"Tool '{name}' timed out after {_TOOL_TIMEOUT_S}s "
+                        "(likely a network stall — result unavailable)."
+                    )
+                }
+            )
         except ToolError as exc:
             return json.dumps({"error": str(exc)})
-
-
-# ── OpenAI tool schemas ───────────────────────────────────────────────────────
-
-TOOL_SCHEMAS: list[dict] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "search_web",
-            "description": (
-                "Search the web for factual information to verify a claim in the "
-                "assistant's response. Returns a list of search results with title, "
-                "URL, and a short snippet. Use this when you need to check whether "
-                "a specific fact, law, organisation, or statistic is accurate."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "A concise, specific search query.",
-                    }
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "fetch_url",
-            "description": (
-                "Fetch and read the full text content of a web page. Use this "
-                "after search_web to read a specific source in more detail — "
-                "for example, to verify the text of a law, policy, or report."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "The full URL to fetch.",
-                    }
-                },
-                "required": ["url"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "check_url_validity",
-            "description": (
-                "Check whether a URL mentioned in the assistant's response is "
-                "reachable and returns a valid HTTP response. Use this for every "
-                "URL, link, or web address that appears in the assistant response — "
-                "broken or fabricated links are a factuality violation. "
-                "Returns: valid (bool), status_code, final_url after redirects, "
-                "redirect_count, and error message if unreachable."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "The full URL to check (must start with http:// or https://).",
-                    }
-                },
-                "required": ["url"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "check_acronym",
-            "description": (
-                "Verify whether an acronym in the assistant's response stands for what it claims. "
-                "Works for acronyms in any language (English, French, Farsi, Arabic, etc.). "
-                "Searches the web for the correct expansion and returns top results with a "
-                "heuristic match score. Use this whenever the response contains an acronym "
-                "alongside an explicit expansion (e.g. 'OFPRA (Office Français de Protection ...)' "
-                "or 'WHO (World Health Organization)'). "
-                "Apply −0.10 deduction if the expansion is confirmed wrong; "
-                "−0.05 if unverifiable. Affects factuality criterion only."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "acronym": {
-                        "type": "string",
-                        "description": (
-                            "The acronym letters as they appear in the response "
-                            "(e.g. 'NATO', 'OFPRA', 'UN', 'CESEDA', 'WHO')."
-                        ),
-                    },
-                    "claimed_expansion": {
-                        "type": "string",
-                        "description": (
-                            "The full expansion the response gives for this acronym. "
-                            "Copy it verbatim from the response text."
-                        ),
-                    },
-                    "context_language": {
-                        "type": "string",
-                        "description": (
-                            "BCP-47 language tag of the response text "
-                            "(e.g. 'en', 'fr', 'fa', 'ar', 'de'). "
-                            "Defaults to 'en' if omitted."
-                        ),
-                    },
-                },
-                "required": ["acronym", "claimed_expansion"],
-            },
-        },
-    },
-]
