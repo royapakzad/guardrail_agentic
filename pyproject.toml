@@ -1,0 +1,85 @@
+[project]
+name = "guardrails-multi-search"
+version = "0.1.0"
+description = "Multilingual LLM guardrail evaluation toolkit"
+requires-python = ">=3.12"
+dependencies = [
+    # Guardrail backends (PR #12: bumped 0.2.2 → 0.5.1)
+    "any-guardrail[flowjudge,huggingface]==0.5.1",
+    # PR #8 fix: google extra does not exist; correct name is gemini
+    # PR #12: <1 → >=1.7.0 (required by any-guardrail 0.5.x)
+    # PR #14: platform extra enables transparent Otari usage-tracking integration
+    "any-llm-sdk[openai,anthropic,gemini,mistral,platform]>=1.7.0",
+    "python-dotenv==1.2.1",
+    # Numerical / scientific
+    "numpy==2.2.6",
+    "scipy==1.16.3",
+    # HuggingFace stack
+    "transformers==4.57.3",
+    "huggingface_hub==0.36.0",
+    # Deep learning backend
+    "torch==2.9.1",
+]
+
+[project.optional-dependencies]
+# Install for the agentic retrieval path:
+#   uv sync --extra agentic
+agentic = [
+    "ddgs>=6.0.0",
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "trafilatura>=2.0.0",      # PR #16: clean article-text extraction
+    "tavily-python>=0.3.0",
+    "tiktoken>=0.7.0",
+]
+# Install for the Streamlit results dashboard:
+#   uv sync --extra dashboard
+dashboard = [
+    "streamlit>=1.35.0",
+    "pandas>=2.0.0",
+]
+# Install for development (lint, type-check, tests):
+#   uv sync --extra dev
+dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.14.0",
+    "ruff>=0.15.12",
+    "mypy>=1.11.0",
+    "pre-commit>=3.8.0",
+    "guardrails-multi-search[agentic]",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agentic_guardrails"]
+
+# ── ruff ──────────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = ["visualize_results.py", "demo_guardrail_log.py"]
+
+[tool.ruff.lint]
+# Moderate rule set — ratchet up later
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # function call in default args
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ── mypy ──────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+
+# ── pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["agentic_guardrails"]
