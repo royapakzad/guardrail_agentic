@@ -219,14 +219,18 @@ class ScenarioLogger:
         }
 
         self._write(_section(f"STEP 2B — AGENTIC GUARDRAIL  [policy: {policy_label}]"))
-        self._write(f"  Provider : {provider}  |  Model : {model}  |  Max tool calls : {max_tool_calls}\n")
+        self._write(
+            f"  Provider : {provider}  |  Model : {model}  |  Max tool calls : {max_tool_calls}\n"
+        )
         self._write(
             _box(
                 "GUARDRAIL SYSTEM PROMPT  (contains POLICY + RUBRIC + phase instructions)",
                 guardrail_system_prompt,
             )
         )
-        self._write(_box("GUARDRAIL USER MESSAGE  (conversation to evaluate)", guardrail_user_message))
+        self._write(
+            _box("GUARDRAIL USER MESSAGE  (conversation to evaluate)", guardrail_user_message)
+        )
 
     def log_tool_call(
         self,
@@ -317,7 +321,9 @@ class ScenarioLogger:
             )
             if token_usage_per_turn:
                 self._write("\n  Per-turn token breakdown:")
-                self._write(f"    {'Turn':>4}  {'Prompt':>8}  {'Completion':>10}  {'Total':>8}  Tool calls?")
+                self._write(
+                    f"    {'Turn':>4}  {'Prompt':>8}  {'Completion':>10}  {'Total':>8}  Tool calls?"
+                )
                 self._write(f"    {'─' * 4}  {'─' * 8}  {'─' * 10}  {'─' * 8}  {'─' * 10}")
                 for t in token_usage_per_turn:
                     has_tc = "yes" if t.get("has_tool_calls") else "no"

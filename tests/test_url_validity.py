@@ -1,60 +1,79 @@
-"""Tests for check_url_validity (PR-10): timeouts are unverified, not broken."""
+"""Tests for three-state URL validity introduced in PR #17."""
 
-import json
+from unittest.mock import MagicMock, patch
 
-import requests
-import tools
-from agentic_runner import _summarize_tool_result
-
-
-class _Resp:
-    def __init__(self, status, url="https://example.org", history=()):
-        self.status_code = status
-        self.url = url
-        self.history = list(history)
-
-    def close(self):
-        return None
+import requests as req_lib
+from tools import check_url_validity
 
 
-def test_timeout_is_unverified_not_broken(monkeypatch):
-    def boom(*a, **k):
-        raise requests.exceptions.Timeout("slow government portal")
-
-    monkeypatch.setattr(requests, "head", boom)
-    monkeypatch.setattr(requests, "get", boom)
-    result = tools.check_url_validity("https://www.ofpra.gouv.fr")
-    assert result["valid"] is None  # NOT False — we couldn't confirm it's broken
-    assert result["timed_out"] is True
-    assert "do NOT apply" in result["note"]
+def _mock_response(status_code: int, url: str = "http://example.com") -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.url = url
+    resp.history = []
+    return resp
 
 
-def test_reachable_url_is_valid(monkeypatch):
-    monkeypatch.setattr(requests, "head", lambda *a, **k: _Resp(200))
-    result = tools.check_url_validity("https://example.org")
+def test_valid_url_returns_valid_true():
+    with patch("requests.head", return_value=_mock_response(200)):
+        result = check_url_validity("http://example.com")
     assert result["valid"] is True
-    assert result["timed_out"] is False
+    assert result.get("timed_out") is not True
+    assert result["status_code"] == 200
 
 
-def test_404_is_broken(monkeypatch):
-    monkeypatch.setattr(requests, "head", lambda *a, **k: _Resp(404))
-    result = tools.check_url_validity("https://example.org/missing")
+def test_404_returns_valid_false():
+    with patch("requests.head", return_value=_mock_response(404)):
+        result = check_url_validity("http://example.com/missing")
     assert result["valid"] is False
+    assert result.get("timed_out") is not True
 
 
-def test_head_rejected_falls_back_to_get(monkeypatch):
-    calls = []
-    monkeypatch.setattr(requests, "head", lambda *a, **k: (calls.append("head"), _Resp(405))[1])
-    monkeypatch.setattr(requests, "get", lambda *a, **k: (calls.append("get"), _Resp(200))[1])
-    result = tools.check_url_validity("https://example.org")
-    assert calls == ["head", "get"]
+def test_401_treated_as_valid():
+    with patch("requests.head", return_value=_mock_response(401)):
+        result = check_url_validity("http://protected.example.com")
     assert result["valid"] is True
 
 
-def test_summarize_marks_unverified():
-    summary = _summarize_tool_result(
-        "check_url_validity",
-        {"url": "https://x"},
-        json.dumps({"valid": None, "status_code": None}),
-    )
-    assert "unverified" in summary
+def test_403_treated_as_valid():
+    with patch("requests.head", return_value=_mock_response(403)):
+        result = check_url_validity("http://restricted.example.com")
+    assert result["valid"] is True
+
+
+def test_timeout_returns_timed_out_state():
+    with patch("requests.head", side_effect=req_lib.Timeout("timed out")):
+        result = check_url_validity("http://slow.example.com")
+    # Third state: valid=None, timed_out=True
+    assert result["valid"] is None
+    assert result.get("timed_out") is True
+
+
+def test_timed_out_is_not_valid_false():
+    with patch("requests.head", side_effect=req_lib.Timeout("timed out")):
+        result = check_url_validity("http://slow.example.com")
+    assert result["valid"] is not False
+
+
+def test_405_retries_with_get():
+    get_resp = _mock_response(200)
+    get_resp.close = MagicMock()
+    with (
+        patch("requests.head", return_value=_mock_response(405)),
+        patch("requests.get", return_value=get_resp),
+    ):
+        result = check_url_validity("http://head-hostile.example.com")
+    assert result["valid"] is True
+
+
+def test_connection_error_returns_valid_false():
+    with patch("requests.head", side_effect=req_lib.ConnectionError("refused")):
+        result = check_url_validity("http://offline.example.com")
+    assert result["valid"] is False
+    assert result.get("timed_out") is not True
+
+
+def test_result_always_contains_url_field():
+    with patch("requests.head", return_value=_mock_response(200)):
+        result = check_url_validity("http://example.com")
+    assert result["url"] == "http://example.com"

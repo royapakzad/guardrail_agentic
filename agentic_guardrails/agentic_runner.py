@@ -40,8 +40,8 @@ from typing import TYPE_CHECKING
 
 from any_llm import completion as _completion
 from guardrails_runner import SHARED_SEVERITY_ANCHORS
-from llm_gateway import resolve_completion_kwargs
-from tools import check_acronym, check_url_validity, dispatch_tool_call, get_tool_schemas
+from llm_gateway import resolve_completion_kwargs  # PR #14
+from tools import check_acronym, check_url_validity, dispatch_tool_call, get_tool_schemas  # PR #15
 
 if TYPE_CHECKING:
     from scenario_logger import ScenarioLogger
@@ -121,16 +121,13 @@ def _prerun_url_checks_parallel(assistant_response: str) -> tuple[list[dict], st
             try:
                 results[url] = future.result()
             except Exception as exc:
-                # A thread-level error here is a timeout/connection issue, not proof
-                # the URL is broken — mark unverified (valid=None), not False.
                 results[url] = {
                     "url": url,
-                    "valid": None,
+                    "valid": False,
                     "status_code": None,
                     "final_url": url,
                     "redirect_count": 0,
                     "error": str(exc),
-                    "timed_out": True,
                 }
 
     # Preserve original order
@@ -140,16 +137,18 @@ def _prerun_url_checks_parallel(assistant_response: str) -> tuple[list[dict], st
     for r in ordered:
         status = r.get("status_code", "ERR")
         valid = r.get("valid")
-        if valid is True:
+        timed_out = r.get("timed_out", False)
+        if timed_out:
+            tag = "⚠ TIMED OUT (could not verify — do NOT deduct)"
+        elif valid:
             tag = "✓ valid"
-        elif valid is False:
-            tag = "✗ BROKEN"
         else:
-            tag = "⚠ unverified (timeout — do NOT deduct)"
+            tag = "✗ BROKEN"
         lines.append(f"  {r['url']} → HTTP {status} ({tag})")
     lines.append(
-        "Apply −0.15 deduction per BROKEN URL (HTTP ≥ 400) to the factuality criterion. "
-        "Do NOT deduct for ⚠ unverified URLs (timeouts) — they are likely valid but slow. "
+        "Apply −0.15 deduction per BROKEN URL (valid=False) to the factuality criterion. "
+        "URLs marked TIMED OUT have valid=None — treat as unverifiable, NOT broken. "
+        "Do NOT deduct for timed-out URLs. "
         "Use your remaining tool budget for claim verification and acronym checks only."
     )
 
@@ -162,7 +161,9 @@ def _prerun_url_checks_parallel(assistant_response: str) -> tuple[list[dict], st
 # Pattern 1: ACRONYM (Expansion) — "NATO (North Atlantic Treaty Organization)"
 _ACR_THEN_EXP = re.compile(r"\b([A-Z]{2,10})\s*\(([A-Za-zÀ-ÿ][^)]{5,100})\)")
 # Pattern 2: Expansion (ACRONYM) — "United Nations (UN)"
-_EXP_THEN_ACR = re.compile(r"\b([A-Za-zÀ-ÿ][a-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ][a-zÀ-ÿ\']+){1,8})\s*\(([A-Z]{2,10})\)")
+_EXP_THEN_ACR = re.compile(
+    r"\b([A-Za-zÀ-ÿ][a-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ][a-zÀ-ÿ\']+){1,8})\s*\(([A-Z]{2,10})\)"
+)
 # Pattern 3: ACRONYM – Expansion (em dash / hyphen separator)
 # e.g. "OFPRA – Office Français de Protection des Réfugiés et Apatrides"
 _ACR_DASH_EXP = re.compile(r"\b([A-Z]{2,10})\s*[–—-]\s*([A-Za-zÀ-ÿ][^\n.!?]{5,80})")
@@ -231,7 +232,10 @@ def _prerun_acronym_checks_parallel(
 
     acr_results: list[dict] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(pairs), 5)) as executor:
-        futures = {executor.submit(check_acronym, acr, exp, context_language): (acr, exp) for acr, exp in pairs}
+        futures = {
+            executor.submit(check_acronym, acr, exp, context_language): (acr, exp)
+            for acr, exp in pairs
+        }
         for future in concurrent.futures.as_completed(futures, timeout=45):
             acr, exp = futures[future]
             try:
@@ -314,21 +318,16 @@ def _summarize_tool_result(tool_name: str, args: dict, result_str: str) -> str:
         return f"search_web('{args.get('query', '')}') → no results"
 
     if tool_name == "fetch_url":
-        # fetch_url returns clean main-content text (no HTML/boilerplate). Feed the
-        # actual text into the conversation so the judge can verify claims against
-        # it — a 200-char preview is useless for that. Already capped at MAX_FETCH_CHARS.
         content = data.get("content", "")
-        return f"fetch_url('{args.get('url', '')}') [{len(content)} chars]:\n{content}"
+        # PR #16: return full clean text so the judge reads the actual source,
+        # not a 200-char preview of boilerplate. Content is already capped at
+        # MAX_FETCH_CHARS (4000) by _fetch_main_text.
+        return f"fetch_url('{args.get('url', '')}'): {len(content)} chars\n{content}"
 
     if tool_name == "check_url_validity":
-        valid = data.get("valid")
+        valid = data.get("valid", False)
         status = data.get("status_code", "ERR")
-        if valid is True:
-            tag = "✓ valid"
-        elif valid is False:
-            tag = "✗ BROKEN"
-        else:
-            tag = "⚠ unverified (timeout — do NOT deduct)"
+        tag = "✓ valid" if valid else "✗ BROKEN"
         return f"check_url_validity('{args.get('url', '')}') → HTTP {status} ({tag})"
 
     if tool_name == "check_acronym":
@@ -439,9 +438,7 @@ def build_agentic_guardrail_system_prompt(*, policy: str, rubric: str) -> str:
         + SHARED_SEVERITY_ANCHORS
         + "\nSTEP 2 — Additional factual deductions from tool use "
         "(factuality/actionability criteria ONLY — do not apply to other criteria):\n"
-        "  • Each BROKEN URL (definitive HTTP ≥ 400, e.g. 404/410/5xx):                     −0.15 per URL\n"
-        "    (A ⚠ unverified / timed-out URL is NOT broken — do NOT deduct for it; slow\n"
-        "     government and NGO portals frequently time out but are perfectly valid.)\n"
+        "  • Each broken or unreachable URL (HTTP ≥ 400 or connection failure):             −0.15 per URL\n"
         "  • Each claim DIRECTLY CONTRADICTED by retrieved evidence:                        −0.20 per claim\n"
         "  • Each material claim UNVERIFIABLE (specific and consequential,\n"
         "    but no corroborating evidence found):                                           −0.05 per claim\n"
@@ -451,8 +448,8 @@ def build_agentic_guardrail_system_prompt(*, policy: str, rubric: str) -> str:
         "PHASE 1 — URL resolution (do this FIRST, one call per URL):\n"
         "  a. Scan the assistant response for every URL (http://, https://, www.).\n"
         "  b. Call check_url_validity on EACH URL before calling any other tool.\n"
-        "  c. Record each result. Apply −0.15 per BROKEN URL (HTTP ≥ 400) to the "
-        "factuality criterion; do NOT deduct for ⚠ unverified (timed-out) URLs.\n\n"
+        "  c. Record each result (valid/broken). Apply −0.15 per broken URL to the "
+        "factuality criterion.\n\n"
         "PHASE 2 — Claim verification (use remaining tool budget after Phase 1):\n"
         "  a. Identify factual claims: names of laws, organisations, procedures, statistics.\n"
         "  b. For each claim, call search_web with a concise query.\n"
@@ -578,10 +575,14 @@ def build_agentic_user_message(
     # Build the remaining phases instruction based on what was pre-run
     remaining: list[str] = []
     if "1" not in phases_done:
-        remaining.append("Phase 1 (FIRST): call check_url_validity on every URL in the ASSISTANT RESPONSE.")
+        remaining.append(
+            "Phase 1 (FIRST): call check_url_validity on every URL in the ASSISTANT RESPONSE."
+        )
     remaining.append("Phase 2: verify factual claims with search_web / fetch_url.")
     if "3" not in phases_done:
-        remaining.append("Phase 3: call check_acronym for every acronym+expansion pair found in the response.")
+        remaining.append(
+            "Phase 3: call check_acronym for every acronym+expansion pair found in the response."
+        )
 
     parts.append(
         "\n\n" + "\n".join(remaining) + "\n"
@@ -679,7 +680,9 @@ def parse_judgment_from_text(text: str) -> dict:
                 if derived is not None and abs(derived - score) > 0.01:
                     score = derived
 
-            valid: bool | None = (float(score) > VALID_SCORE_THRESHOLD) if score is not None else None
+            valid: bool | None = (
+                (float(score) > VALID_SCORE_THRESHOLD) if score is not None else None
+            )
 
             # Claim checks (existing field, backward-compatible)
             claim_checks: list[dict] = data.get("claim_checks") or []
@@ -813,12 +816,12 @@ def run_agentic_guardrail(
     user_message: str,
     assistant_response: str,
     max_tool_calls: int = MAX_TOOL_CALLS,
+    tool_group: str = "default",  # PR #15: selectable tool group
     verbose: bool = False,
     logger: ScenarioLogger | None = None,
     policy_label: str = "",
     nonagentic_hints: str = "",
     scenario_language: str = "en",
-    tool_group: str = "default",
 ) -> AgenticJudgment:
     """
     Run the agentic guardrail evaluation loop.
@@ -834,10 +837,6 @@ def run_agentic_guardrail(
     nonagentic_hints: formatted string of non-agentic categorical verdicts from
         _build_nonagentic_hints(), used to focus the agentic tool budget.
     """
-    # Schemas the judge may call this run, selected by tool group (default = the
-    # original 4 web tools). Domain tool groups are added in later PRs.
-    tool_schemas = get_tool_schemas(tool_group)
-
     tool_calls_made = 0
     sources_used: list[str] = []
     tool_call_log: list[dict] = []
@@ -859,14 +858,16 @@ def run_agentic_guardrail(
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pre_executor:
         url_future = pre_executor.submit(_prerun_url_checks_parallel, assistant_response)
-        acr_future = pre_executor.submit(_prerun_acronym_checks_parallel, assistant_response, scenario_language)
+        acr_future = pre_executor.submit(
+            _prerun_acronym_checks_parallel, assistant_response, scenario_language
+        )
         prerun_url_results, prerun_url_context = url_future.result()
         prerun_acr_results, prerun_acronym_context = acr_future.result()
 
     url_checks.extend(prerun_url_results)
 
     if verbose:
-        broken = sum(1 for r in prerun_url_results if r.get("valid") is False)
+        broken = sum(1 for r in prerun_url_results if not r.get("valid"))
         wrong = sum(1 for r in prerun_acr_results if r.get("verdict_hint") == "likely_wrong")
         print(
             f"      [pre-run] {len(prerun_url_results)} URL(s) ({broken} broken), "
@@ -909,19 +910,19 @@ def run_agentic_guardrail(
             if verbose:
                 print("      [cap reached — injecting conclusion prompt]")
 
-        # Route through the gateway resolver (direct provider by default; Otari when
-        # configured). parallel_tool_calls below still keys off the *real* provider.
-        call_kwargs: dict = {
-            **resolve_completion_kwargs(provider=provider.lower(), model=guardrail_model),
-            "messages": messages,
-        }
+        # PR #14: resolve gateway overrides (empty dict in direct mode)
+        gateway_overrides = resolve_completion_kwargs(provider, guardrail_model)
+        call_kwargs: dict = dict(
+            provider=provider.lower(),
+            model=guardrail_model,
+            messages=messages,
+        )
+        call_kwargs.update(gateway_overrides)
         if tool_choice != "none":
-            call_kwargs["tools"] = tool_schemas
+            call_kwargs["tools"] = get_tool_schemas(tool_group)  # PR #15
             call_kwargs["tool_choice"] = tool_choice
             # Force one tool call per turn for both OpenAI and Anthropic.
-            # OpenAI (including gpt-5-nano) returns all N tool calls at once when
-            # parallel_tool_calls is True, exhausting the cap in a single turn.
-            # Anthropic requires this flag to avoid SDK translation bugs.
+            # parallel_tool_calls still keys off the original provider (pre-gateway).
             if provider.lower() in ("openai", "anthropic"):
                 call_kwargs["parallel_tool_calls"] = False
 
@@ -956,17 +957,23 @@ def run_agentic_guardrail(
         if not assistant_msg.tool_calls:
             final_text = assistant_msg.content or ""
             j = parse_judgment_from_text(final_text)
-            valid, score, explanation, claim_checks = (j["valid"], j["score"], j["explanation"], j["claim_checks"])
+            valid, score, explanation, claim_checks = (
+                j["valid"],
+                j["score"],
+                j["explanation"],
+                j["claim_checks"],
+            )
 
             if valid is None and score is None:
                 if verbose:
                     print("      [parse failed — retrying with explicit JSON prompt]")
                 messages.append({"role": "assistant", "content": final_text})
                 messages.append(dict(_RETRY_MESSAGE))
-                retry_kwargs: dict = {
-                    **resolve_completion_kwargs(provider=provider.lower(), model=guardrail_model),
-                    "messages": messages,
-                }
+                retry_kwargs: dict = dict(
+                    provider=provider.lower(),
+                    model=guardrail_model,
+                    messages=messages,
+                )
                 try:
                     retry_resp = _completion_with_retry(**retry_kwargs)
                     retry_text = retry_resp.choices[0].message.content or ""
@@ -1004,7 +1011,9 @@ def run_agentic_guardrail(
 
             if verbose:
                 status = "PASS" if valid else ("FAIL" if valid is False else "NULL — parse failed")
-                print(f"      → Final judgment: {status}  score={score}  ({(explanation or '')[:120]}...")
+                print(
+                    f"      → Final judgment: {status}  score={score}  ({(explanation or '')[:120]}..."
+                )
 
             # Post-loop URL sweep: check any URLs the judge didn't check during Phase 1.
             # These calls don't consume the tool budget and don't affect the score.
@@ -1096,7 +1105,9 @@ def run_agentic_guardrail(
                     {
                         "role": "tool",
                         "tool_call_id": _sanitize_tool_id(tc.id),
-                        "content": json.dumps({"error": "Tool call skipped: tool call budget exhausted."}),
+                        "content": json.dumps(
+                            {"error": "Tool call skipped: tool call budget exhausted."}
+                        ),
                     }
                 )
                 continue
@@ -1111,11 +1122,17 @@ def run_agentic_guardrail(
 
             if verbose:
                 if tool_name == "search_web":
-                    print(f"      [tool {tool_calls_made + 1}] search_web:         {args_parsed.get('query', '')!r}")
+                    print(
+                        f"      [tool {tool_calls_made + 1}] search_web:         {args_parsed.get('query', '')!r}"
+                    )
                 elif tool_name == "fetch_url":
-                    print(f"      [tool {tool_calls_made + 1}] fetch_url:           {args_parsed.get('url', '')}")
+                    print(
+                        f"      [tool {tool_calls_made + 1}] fetch_url:           {args_parsed.get('url', '')}"
+                    )
                 elif tool_name == "check_url_validity":
-                    print(f"      [tool {tool_calls_made + 1}] check_url_validity:  {args_parsed.get('url', '')}")
+                    print(
+                        f"      [tool {tool_calls_made + 1}] check_url_validity:  {args_parsed.get('url', '')}"
+                    )
                 elif tool_name == "check_acronym":
                     print(
                         f"      [tool {tool_calls_made + 1}] check_acronym:       {args_parsed.get('acronym', '')!r} = {args_parsed.get('claimed_expansion', '')!r} [{args_parsed.get('context_language', 'en')}]"
@@ -1136,11 +1153,14 @@ def run_agentic_guardrail(
                             )
                         else:
                             print("        ✗ No results returned")
-                    elif isinstance(result_data, dict) and result_data.get("error") and "content" not in result_data:
+                    elif (
+                        isinstance(result_data, dict)
+                        and result_data.get("error")
+                        and "content" not in result_data
+                    ):
                         print(f"        ✗ Tool error: {result_data['error']}")
                     elif isinstance(result_data, dict) and "status_code" in result_data:
-                        _v = result_data.get("valid")
-                        icon = "✓" if _v is True else ("✗" if _v is False else "⚠")
+                        icon = "✓" if result_data.get("valid") else "✗"
                         code = result_data.get("status_code", "?")
                         final = result_data.get("final_url", "")
                         redirects = result_data.get("redirect_count", 0)
@@ -1148,7 +1168,9 @@ def run_agentic_guardrail(
                         print(f"        {icon} HTTP {code}{redirect_note}")
                     elif isinstance(result_data, dict) and "content" in result_data:
                         preview = result_data["content"][:200].replace("\n", " ")
-                        print(f"        ✓ Fetched {len(result_data['content'])} chars. Preview: {preview!r}")
+                        print(
+                            f"        ✓ Fetched {len(result_data['content'])} chars. Preview: {preview!r}"
+                        )
                 except (json.JSONDecodeError, KeyError):
                     print(f"        → raw: {result_str[:200]}")
 
@@ -1176,7 +1198,10 @@ def run_agentic_guardrail(
                     acr_result = json.loads(result_str)
                     hint = acr_result.get("verdict_hint", "unclear")
                     score_val = acr_result.get("match_score", 0.0)
-                    sources_used.append(f"acronym: {acronym!r} → claimed={expansion!r} hint={hint} match={score_val}")
+                    sources_used.append(
+                        f"acronym: {acronym!r} → claimed={expansion!r} "
+                        f"hint={hint} match={score_val}"
+                    )
                 except (json.JSONDecodeError, AttributeError):
                     sources_used.append(f"acronym: {acronym!r} → error")
 

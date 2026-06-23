@@ -1,6 +1,10 @@
 """
 visualize_results.py  —  Multilingual LLM Guardrail Evaluation Dashboard
 Usage: streamlit run visualize_results.py
+
+Score integrity: scores are read directly from the JSON output fields, which are
+already verified against explanation arithmetic during evaluation (see agentic_runner.py
+_rederive_score_from_explanation). The displayed score is authoritative.
 """
 from __future__ import annotations
 
@@ -25,49 +29,394 @@ st.set_page_config(
 # ── CSS ────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-html, body, [class*="css"], .stApp, .stMarkdown, p, span, div, td, th, label {
-    font-family: 'Inter', sans-serif !important;
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+html, body, .stApp { background-color: #F7F9FC !important; }
+
+/* Apply Inter to all text — but NOT to Streamlit icon elements which use
+   a special icon font. The * selector would corrupt icon rendering. */
+body, .stMarkdown, p, div, td, th, label, li, button, input, select, textarea,
+h1, h2, h3, h4, h5, h6, .stApp, [class*="css"] {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+    color: #1E293B;
 }
+
+/* Preserve Streamlit's icon font for expander toggles and material icons */
+[data-testid="stExpanderToggleIcon"],
+[data-testid="stIconMaterial"],
+[data-baseweb="icon"],
+.material-symbols-rounded,
+span[aria-hidden="true"] {
+    font-family: inherit !important;
+}
+
 #MainMenu, footer, header { visibility: hidden; }
+.block-container { background: #F7F9FC !important; padding-top: 2rem !important; max-width: 1440px; }
+section[data-testid="stMain"] { background: #F7F9FC !important; }
 
-[data-testid="metric-container"] {
-    background: #fff; border: 1px solid #E2E8F0; border-radius: 12px;
-    padding: 16px 18px !important; box-shadow: 0 1px 3px rgba(0,0,0,.05);
+/* ── Headings ────────────────────────────────────────────────────────────── */
+h1 {
+    font-size: 1.65rem !important; font-weight: 800 !important;
+    color: #0F172A !important; letter-spacing: -.02em;
+    margin-bottom: .35rem; line-height: 1.2;
 }
-[data-testid="stMetricValue"]  { font-size:1.6rem !important; font-weight:800 !important; color:#0F172A !important; }
-[data-testid="stMetricLabel"]  { font-size:.70rem !important; font-weight:600 !important; color:#64748B !important; text-transform:uppercase; letter-spacing:.06em; }
-[data-testid="stMetricDelta"]  { font-size:.80rem !important; font-weight:500 !important; }
+h2 {
+    font-size: 1.2rem !important; font-weight: 700 !important;
+    color: #0F172A !important; margin: 1.8rem 0 .6rem;
+    padding-bottom: 8px; border-bottom: 2px solid #E2E8F0;
+    letter-spacing: -.01em;
+}
+h3 {
+    font-size: 1.0rem !important; font-weight: 600 !important;
+    color: #334155 !important; margin: 1.2rem 0 .5rem;
+}
+strong { color: #0F172A !important; }
+p { font-size: .96rem; line-height: 1.75; color: #334155; }
 
-[data-testid="stSidebar"] { background:#0F2448 !important; }
+/* ── Widgets ─────────────────────────────────────────────────────────────── */
+[data-testid="stSelectbox"] > div > div,
+[data-testid="stMultiSelect"] > div > div {
+    background-color: #fff !important; border: 1px solid #E2E8F0 !important;
+    border-radius: 8px !important; color: #1E293B !important;
+}
+[data-baseweb="select"] > div:first-child {
+    background-color: #fff !important; border-color: #E2E8F0 !important;
+    border-radius: 8px !important; min-height: 42px;
+}
+[data-baseweb="select"] * { color: #1E293B !important; }
+[data-baseweb="select"] svg { fill: #64748B !important; }
+[data-baseweb="popover"] { z-index: 9999 !important; }
+[data-baseweb="menu"], [data-baseweb="list"] {
+    background-color: #fff !important; border: 1px solid #E2E8F0 !important;
+    border-radius: 10px !important; box-shadow: 0 8px 32px rgba(15,23,42,.12) !important;
+}
+[data-baseweb="list-item"], [data-baseweb="option"] {
+    background-color: #fff !important; color: #1E293B !important;
+    font-size: .92rem !important; padding: 9px 14px !important;
+}
+[data-baseweb="list-item"]:hover { background-color: #EFF6FF !important; }
+[data-baseweb="tag"] {
+    background-color: #EFF6FF !important; border: 1px solid #BFDBFE !important;
+    border-radius: 6px !important;
+}
+[data-baseweb="tag"] span, [data-baseweb="tag"] button { color: #1D4ED8 !important; font-size: .84rem !important; }
+[data-baseweb="input"], [data-baseweb="base-input"],
+[data-testid="stTextInput"] input, [data-testid="stNumberInput"] input {
+    background-color: #fff !important; color: #1E293B !important;
+    border-color: #E2E8F0 !important; font-size: .93rem !important;
+}
+[data-testid="stCheckbox"] label { color: #334155 !important; font-size: .92rem !important; }
+[data-baseweb="checkbox"] div[role="checkbox"] {
+    border-color: #94A3B8 !important; background-color: #fff !important;
+    border-radius: 4px !important;
+}
+[data-testid="stRadio"] label { color: #334155 !important; font-size: .92rem !important; }
+[data-testid="stRadio"] div[role="radiogroup"] label span { color: #475569 !important; }
+[data-testid="stFileUploader"] section {
+    background: #fff !important; border: 2px dashed #CBD5E1 !important;
+    border-radius: 12px !important; padding: 20px !important;
+}
+[data-testid="stFileUploader"] label,
+[data-testid="stFileUploader"] p { color: #64748B !important; font-size: .92rem !important; }
+[data-testid="stDataFrame"] {
+    background: #fff !important; border: 1px solid #E2E8F0 !important;
+    border-radius: 12px !important; overflow: hidden;
+}
+[data-testid="stDataFrame"] > div { background: #fff !important; }
+[data-testid="stCaptionContainer"] p, .stCaption {
+    color: #64748B !important; font-size: .83rem !important; line-height: 1.6 !important;
+}
+[data-testid="baseButton-secondary"], button[kind="secondary"] {
+    background: #fff !important; border: 1px solid #E2E8F0 !important;
+    color: #334155 !important; border-radius: 8px !important; font-size: .92rem !important;
+}
+[data-testid="baseButton-primary"], button[kind="primary"] {
+    background: #2563EB !important; color: #fff !important;
+    border-radius: 8px !important; border: none !important; font-size: .92rem !important;
+}
+[data-testid="column"] { background: transparent !important; }
+details { background: #fff !important; }
+summary { color: #1E293B !important; font-weight: 600 !important; }
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+[data-testid="stSidebar"] {
+    background: #0F172A !important;
+    border-right: 1px solid #1E293B;
+    min-width: 270px;
+}
 [data-testid="stSidebar"] .stMarkdown,
 [data-testid="stSidebar"] p,
 [data-testid="stSidebar"] span,
 [data-testid="stSidebar"] label,
-[data-testid="stSidebar"] div { color:#CBD5E1 !important; }
-[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] div { color: #CBD5E1 !important; font-size: .92rem !important; }
+[data-testid="stSidebar"] h1 {
+    color: #F8FAFC !important; font-weight: 800 !important;
+    font-size: 1.25rem !important; letter-spacing: -.01em;
+    border-bottom: none; padding-bottom: 0; margin-bottom: .15rem;
+}
 [data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3 { color:#F1F5F9 !important; font-weight:700 !important; }
-[data-testid="stSidebar"] .stSelectbox > div > div { background:#1E3A5F !important; border-color:#334155 !important; color:#E2E8F0 !important; }
-[data-testid="stSidebar"] hr { border-color:#1E3A5F !important; }
+[data-testid="stSidebar"] h3 {
+    color: #94A3B8 !important; font-weight: 700 !important;
+    font-size: .72rem !important; text-transform: uppercase;
+    letter-spacing: .10em; margin: 1.2rem 0 .5rem;
+    border-bottom: none; padding-bottom: 0;
+}
+[data-testid="stSidebar"] .stSelectbox > div > div {
+    background: #1E293B !important; border-color: #334155 !important; color: #E2E8F0 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] > div:first-child {
+    background: #1E293B !important; border-color: #334155 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] * { color: #E2E8F0 !important; }
+[data-testid="stSidebar"] [data-testid="stMultiSelect"] > div > div {
+    background: #1E293B !important; border-color: #334155 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="tag"] {
+    background: #1D4ED822 !important; border-color: #3B82F688 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="tag"] span { color: #93C5FD !important; }
+[data-testid="stSidebar"] hr { border-color: #1E293B !important; margin: 14px 0; }
+[data-testid="stSidebar"] .stFileUploader label { color: #94A3B8 !important; }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p,
+[data-testid="stSidebar"] .stCaption {
+    color: #64748B !important; font-size: .82rem !important;
+}
 
-.stTabs [data-baseweb="tab-list"] { gap:4px; border-bottom:2px solid #E2E8F0; }
-.stTabs [data-baseweb="tab"] { font-weight:500; font-size:.88rem; color:#64748B; padding:8px 16px; border-radius:8px 8px 0 0; }
-.stTabs [aria-selected="true"] { color:#1B3A6B !important; font-weight:700 !important; border-bottom:2px solid #3B82F6 !important; }
+/* ── Metrics ─────────────────────────────────────────────────────────────── */
+[data-testid="metric-container"] {
+    background: #fff; border: 1px solid #E2E8F0; border-radius: 14px;
+    padding: 20px 22px !important; box-shadow: 0 1px 6px rgba(15,23,42,.06);
+    transition: box-shadow .15s ease;
+}
+[data-testid="metric-container"]:hover {
+    box-shadow: 0 4px 20px rgba(15,23,42,.10);
+}
+[data-testid="stMetricValue"] {
+    font-size: 1.85rem !important; font-weight: 800 !important;
+    color: #0F172A !important; line-height: 1.15 !important;
+}
+[data-testid="stMetricLabel"] {
+    font-size: .76rem !important; font-weight: 700 !important;
+    color: #64748B !important; text-transform: uppercase;
+    letter-spacing: .07em; margin-bottom: 5px !important;
+}
+[data-testid="stMetricDelta"] { font-size: .85rem !important; font-weight: 600 !important; }
 
-h1 { font-size:1.45rem !important; font-weight:800 !important; color:#0F172A !important; letter-spacing:-.03em; }
-h2 { font-size:1.10rem !important; font-weight:700 !important; color:#1E293B !important; }
-h3 { font-size:.92rem  !important; font-weight:600 !important; color:#334155 !important; }
+/* ── Tabs ────────────────────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px; border-bottom: 2px solid #E2E8F0; background: transparent;
+    padding-bottom: 0;
+}
+.stTabs [data-baseweb="tab"] {
+    font-weight: 500; font-size: .95rem; color: #64748B;
+    padding: 10px 22px; border-radius: 8px 8px 0 0; background: transparent;
+    transition: color .15s, background .15s;
+}
+.stTabs [data-baseweb="tab"]:hover { color: #475569 !important; background: #F8FAFC !important; }
+.stTabs [aria-selected="true"] {
+    color: #2563EB !important; font-weight: 700 !important;
+    border-bottom: 2px solid #2563EB !important; background: #EFF6FF !important;
+}
 
-[data-testid="stDataFrame"] th { font-weight:600 !important; font-size:.74rem !important; text-transform:uppercase; letter-spacing:.05em; color:#475569 !important; background:#F8FAFC !important; }
+/* ── DataFrames ──────────────────────────────────────────────────────────── */
+[data-testid="stDataFrame"] th {
+    font-weight: 700 !important; font-size: .80rem !important; text-transform: uppercase;
+    letter-spacing: .05em; color: #475569 !important; background: #F8FAFC !important;
+    padding: 11px 14px !important;
+}
+[data-testid="stDataFrame"] td {
+    color: #334155 !important; font-size: .92rem !important;
+    padding: 9px 14px !important; line-height: 1.5;
+}
 
-.badge-pass { display:inline-block; background:#DCFCE7; color:#166534; font-weight:700; font-size:.70rem; padding:2px 8px; border-radius:999px; }
-.badge-fail { display:inline-block; background:#FEE2E2; color:#991B1B; font-weight:700; font-size:.70rem; padding:2px 8px; border-radius:999px; }
-.score-big  { font-size:2.8rem; font-weight:800; line-height:1; letter-spacing:-.04em; }
-.label-sm   { font-size:.70rem; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:#94A3B8; margin-bottom:6px; }
-.alert-changed { background:#FFF7ED; border:1px solid #FDBA74; border-left:4px solid #F97316; border-radius:8px; padding:10px 14px; color:#7C2D12; font-weight:500; margin:8px 0 12px 0; }
-.info-card { background:#F0F9FF; border:1px solid #BAE6FD; border-radius:10px; padding:12px 16px; margin:6px 0; font-size:.86rem; color:#0C4A6E; }
-.chip { display:inline-block; padding:3px 10px; border-radius:999px; font-size:.75rem; font-weight:600; margin:2px; }
+/* ── Expanders ───────────────────────────────────────────────────────────── */
+[data-testid="stExpander"] {
+    background: #fff; border: 1px solid #E2E8F0 !important;
+    border-radius: 12px !important; overflow: hidden; margin-bottom: 10px;
+}
+[data-testid="stExpander"] summary {
+    font-weight: 600 !important; font-size: .95rem !important;
+    color: #1E293B !important; padding: 14px 18px;
+    transition: background .1s;
+}
+[data-testid="stExpander"] summary:hover { background: #F8FAFC !important; }
+
+/* ── Alert boxes ─────────────────────────────────────────────────────────── */
+[data-testid="stInfo"]    { background: #EFF6FF; border-left: 4px solid #3B82F6; border-radius: 10px; color: #1E3A5F !important; font-size: .93rem !important; padding: 14px 18px !important; }
+[data-testid="stSuccess"] { background: #F0FDF4; border-left: 4px solid #22C55E; border-radius: 10px; color: #14532D !important; font-size: .93rem !important; padding: 14px 18px !important; }
+[data-testid="stWarning"] { background: #FFFBEB; border-left: 4px solid #F59E0B; border-radius: 10px; color: #78350F !important; font-size: .93rem !important; padding: 14px 18px !important; }
+[data-testid="stError"]   { background: #FEF2F2; border-left: 4px solid #EF4444; border-radius: 10px; color: #7F1D1D !important; font-size: .93rem !important; padding: 14px 18px !important; }
+
+/* ── Dividers ────────────────────────────────────────────────────────────── */
+hr { border-color: #E2E8F0 !important; margin: 1.8rem 0; }
+
+/* ════════════════════════════════════════════════════════════════
+   CUSTOM COMPONENT CLASSES
+   ════════════════════════════════════════════════════════════════ */
+
+/* Pass / Fail badges */
+.badge-pass {
+    display: inline-flex; align-items: center; gap: 3px;
+    background: #DCFCE7; color: #166534 !important;
+    font-weight: 700; font-size: .78rem; padding: 4px 12px;
+    border-radius: 999px; letter-spacing: .03em;
+}
+.badge-fail {
+    display: inline-flex; align-items: center; gap: 3px;
+    background: #FEE2E2; color: #991B1B !important;
+    font-weight: 700; font-size: .78rem; padding: 4px 12px;
+    border-radius: 999px; letter-spacing: .03em;
+}
+
+/* Uppercase section label */
+.label-sm {
+    font-size: .74rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .10em; color: #94A3B8 !important; margin-bottom: 6px;
+    display: block;
+}
+
+/* Judgment-changed alert bar */
+.alert-changed {
+    background: #FFF7ED; border: 1px solid #FED7AA; border-left: 4px solid #F97316;
+    border-radius: 10px; padding: 14px 20px; color: #7C2D12 !important;
+    font-weight: 500; font-size: .95rem; margin: 0 0 20px 0;
+    display: flex; align-items: center; gap: 10px;
+}
+
+/* Info card */
+.info-card {
+    background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 10px;
+    padding: 14px 18px; font-size: .93rem; color: #1E3A5F !important;
+    line-height: 1.65;
+}
+
+/* Model / filter chip */
+.chip {
+    display: inline-block; padding: 4px 12px; border-radius: 999px;
+    font-size: .82rem; font-weight: 600; margin: 2px;
+}
+
+/* ── Verdict hero ────────────────────────────────────────────────────────── */
+.verdict-hero {
+    font-size: 2.3rem; font-weight: 900; line-height: 1.1;
+    letter-spacing: -.03em; margin-bottom: 4px;
+}
+.verdict-pass       { color: #059669 !important; }
+.verdict-fail       { color: #DC2626 !important; }
+.verdict-borderline { color: #D97706 !important; }
+.verdict-unknown    { color: #94A3B8 !important; }
+
+/* Verdict card */
+.verdict-card {
+    background: #fff; border: 1px solid #E2E8F0; border-radius: 14px;
+    padding: 22px 26px; box-shadow: 0 2px 8px rgba(15,23,42,.06);
+    margin-bottom: 14px;
+}
+
+/* Confidence chips */
+.conf-high   { display: inline-flex; align-items: center; background: #D1FAE5; color: #065F46 !important; font-size: .74rem; font-weight: 700; padding: 3px 11px; border-radius: 999px; letter-spacing: .04em; }
+.conf-medium { display: inline-flex; align-items: center; background: #FEF3C7; color: #92400E !important; font-size: .74rem; font-weight: 700; padding: 3px 11px; border-radius: 999px; letter-spacing: .04em; }
+.conf-low    { display: inline-flex; align-items: center; background: #FEE2E2; color: #991B1B !important; font-size: .74rem; font-weight: 700; padding: 3px 11px; border-radius: 999px; letter-spacing: .04em; }
+
+/* Score secondary */
+.score-secondary {
+    font-size: 1.05rem; font-weight: 600; color: #64748B !important;
+    margin-top: 6px; line-height: 1.5;
+}
+
+/* ── Criteria comparison table ───────────────────────────────────────────── */
+.crit-table {
+    background: #fff; border: 1px solid #E2E8F0; border-radius: 12px;
+    overflow: hidden; margin: 14px 0;
+}
+.crit-header {
+    background: #F8FAFC; border-bottom: 2px solid #E2E8F0;
+    padding: 10px 16px; font-size: .75rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .08em; color: #64748B !important;
+}
+.crit-row {
+    padding: 12px 16px; border-bottom: 1px solid #F1F5F9;
+    transition: background .1s;
+}
+.crit-row:last-child { border-bottom: none; }
+.crit-row:hover { background: #FAFBFC !important; }
+.crit-name {
+    font-size: .90rem; font-weight: 600; color: #334155 !important;
+    letter-spacing: .01em; line-height: 1.4;
+}
+.crit-name-changed {
+    font-size: .90rem; font-weight: 700; color: #2563EB !important;
+    letter-spacing: .01em; line-height: 1.4;
+}
+
+/* Verdict badges (solid fill, white text) */
+.crit-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: .78rem; font-weight: 700; padding: 4px 13px;
+    border-radius: 999px; letter-spacing: .02em; white-space: nowrap;
+}
+.badge-compliant { background: #059669; color: #fff !important; }
+.badge-minor     { background: #D97706; color: #fff !important; }
+.badge-major     { background: #EA580C; color: #fff !important; }
+.badge-critical  { background: #DC2626; color: #fff !important; }
+.badge-empty     { background: #E2E8F0; color: #64748B !important; }
+
+/* ── Improvements ────────────────────────────────────────────────────────── */
+.impr-section {
+    background: #fff; border: 1px solid #FDE68A; border-radius: 12px;
+    padding: 18px 22px; margin: 12px 0;
+}
+.impr-section-title {
+    font-size: .76rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .08em; color: #92400E !important; margin-bottom: 12px;
+}
+.impr-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    background: #FFFBEB; border: 1px solid #FDE68A;
+    border-left: 4px solid #F59E0B; border-radius: 8px;
+    padding: 10px 14px; margin: 6px 0;
+    font-size: .92rem; line-height: 1.65; color: #78350F !important;
+}
+.impr-item::before {
+    content: "→"; color: #F59E0B !important;
+    font-weight: 700; flex-shrink: 0; margin-top: 2px;
+}
+.impr-inline {
+    font-size: .86rem; color: #92400E !important; line-height: 1.55;
+    padding: 5px 10px 5px 14px; margin: 4px 0 4px 6px;
+    border-left: 3px solid #FCD34D; display: block;
+}
+
+/* ── Explanation panel ───────────────────────────────────────────────────── */
+.expl-panel {
+    background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px;
+    padding: 18px 22px; font-size: .92rem; line-height: 1.9;
+    color: #334155 !important;
+}
+.expl-panel strong { color: #0F172A !important; font-weight: 700; }
+
+/* ── Change indicator (⚡) ──────────────────────────────────────────────── */
+.changed-tag {
+    display: inline-block; background: #EFF6FF; color: #2563EB !important;
+    font-size: .72rem; font-weight: 700; padding: 2px 8px;
+    border-radius: 5px; margin-left: 6px; letter-spacing: .03em;
+}
+
+/* ── File card in sidebar ────────────────────────────────────────────────── */
+.file-card {
+    background: #1E293B; border-radius: 10px;
+    padding: 10px 14px; margin: 8px 0;
+    border: 1px solid #334155;
+}
+.file-card-title {
+    font-size: .88rem !important; font-weight: 600 !important;
+    color: #E2E8F0 !important; display: block; margin-bottom: 3px;
+}
+.file-card-meta {
+    font-size: .78rem !important; color: #64748B !important;
+    line-height: 1.5;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -155,6 +504,210 @@ def ensure_list(val) -> list:
 def avg(lst):
     return sum(lst) / len(lst) if lst else None
 
+_NUMBERED_RE  = re.compile(r"^(\d+)\.\s+([\w][^\n:]{2,60}?):\s*(.*)", re.DOTALL | re.IGNORECASE)
+_VERDICT_INLINE_RE = re.compile(r"(?:→|->)\s*(Verdict\s*:.*)", re.IGNORECASE)
+_VERDICT_LINE_RE2  = re.compile(r"^(?:→|->)\s*(Verdict\s*:.*)", re.IGNORECASE)
+
+def _verdict_text_to_category(vtext: str) -> str:
+    """Map 'Verdict: minor violation (−0.10)' → 'MINOR_ISSUE' etc."""
+    vl = vtext.lower()
+    if "severe" in vl or "critical" in vl:                        return "CRITICAL"
+    if "significant" in vl or "major" in vl:                      return "MAJOR_ISSUE"
+    if "minor" in vl:                                             return "MINOR_ISSUE"
+    if "compliant" in vl or "no violation" in vl or "n/a" in vl: return "COMPLIANT"
+    return "COMPLIANT"
+
+def _parse_verdicts_from_explanation(explanation: str) -> list[dict]:
+    """
+    Fallback: extract per-criterion verdicts from the numbered explanation text.
+
+    Used when criteria_verdicts is absent — e.g. data run before categorical
+    output was added, or when the judge produced old-format JSON.  Parses both
+    inline verdicts ('... → Verdict: minor violation') and verdicts on their
+    own line ('→ Verdict: compliant').
+    """
+    if not explanation or explanation == "—":
+        return []
+    verdicts: list[dict] = []
+    pending_criterion: str | None = None
+
+    for raw in explanation.split("\n"):
+        line = raw.strip()
+        if not line or line.upper().startswith("DEDUCTION SUMMARY"):
+            break
+
+        # Standalone verdict line belonging to the previous criterion
+        vm = _VERDICT_LINE_RE2.match(line)
+        if vm and pending_criterion:
+            verdicts.append({
+                "criterion": pending_criterion,
+                "verdict": _verdict_text_to_category(vm.group(1)),
+                "issues": [], "improvements": [], "_parsed": True,
+            })
+            pending_criterion = None
+            continue
+
+        # Numbered criterion line (may contain inline verdict)
+        m = _NUMBERED_RE.match(line)
+        if m:
+            crit = m.group(2).strip().upper()
+            rest = m.group(3).strip()
+            vi = _VERDICT_INLINE_RE.search(rest)
+            if vi:
+                verdicts.append({
+                    "criterion": crit,
+                    "verdict": _verdict_text_to_category(vi.group(1)),
+                    "issues": [], "improvements": [], "_parsed": True,
+                })
+                pending_criterion = None
+            else:
+                # Verdict may be on the next line
+                pending_criterion = crit
+
+    return verdicts
+
+
+def _derive_verdict(score, stored: str = "") -> str:
+    """Return overall_verdict derived from score; fall back to stored field
+    only when no score is available.
+
+    overall_verdict is a deterministic function of score (PASS >0.70,
+    BORDERLINE 0.55-0.70, FAIL <=0.55 — same thresholds the judge prompts
+    instruct the LLM to use). The 'stored' value comes from the judge LLM's
+    own JSON output and can go stale: the score is sometimes corrected after
+    the fact by re-deriving it from the DEDUCTION SUMMARY arithmetic
+    (see _rederive_score_from_explanation in guardrails_runner.py /
+    agentic_runner.py), but the LLM-stated overall_verdict is not
+    recomputed to match. Always preferring the score keeps the displayed
+    verdict consistent with the displayed score.
+    """
+    if score is None: return stored
+    s = float(score)
+    if s > 0.70: return "PASS"
+    if s <= 0.55: return "FAIL"
+    return "BORDERLINE"
+
+def _derive_confidence(score, stored: str = "") -> str:
+    """Return confidence derived from score; fall back to stored field only
+    when no score is available. See _derive_verdict for why score takes
+    precedence over the stored field.
+
+    HIGH  : score ≤ 0.40 or ≥ 0.80  (far from 0.6 threshold — clear verdict)
+    MEDIUM: score ≤ 0.55 or ≥ 0.70  (moderate distance)
+    LOW   : score between 0.55–0.70  (borderline — close to threshold)
+    """
+    if score is None: return stored or "LOW"
+    s = float(score)
+    if s <= 0.40 or s >= 0.80: return "HIGH"
+    if s <= 0.55 or s >= 0.70: return "MEDIUM"
+    return "LOW"
+
+def _verdict_html(verdict: str) -> str:
+    color_cls = {"PASS": "verdict-pass", "FAIL": "verdict-fail",
+                 "BORDERLINE": "verdict-borderline"}.get(verdict, "verdict-unknown")
+    return f'<div class="verdict-hero {color_cls}">{verdict or "—"}</div>'
+
+def _conf_html(conf: str) -> str:
+    css = {"HIGH": "conf-high", "MEDIUM": "conf-medium", "LOW": "conf-low"}.get(conf, "conf-low")
+    label = {"HIGH": "✓ High confidence", "MEDIUM": "~ Medium confidence",
+             "LOW": "⚠ Borderline"}.get(conf, conf)
+    return f'<span class="{css}">{label}</span>'
+
+
+def _render_explanation(explanation: str) -> str:
+    """
+    Render a numbered-criterion explanation as clean markdown.
+
+    The explanation format (both non-agentic and agentic) is:
+      1. CRITERION NAME: [assessment text] → Verdict: ...
+      2. CRITERION NAME: ...
+      DEDUCTION SUMMARY:
+      Base: 1.0
+      ...
+      Final score: max(0.05, 1.0 − X.XX) = Y.YY
+
+    Each numbered criterion is rendered as a sub-heading; the DEDUCTION SUMMARY
+    is rendered as a code block for easy reading. If the explanation doesn't
+    match this format (e.g. legacy free-form text), it is returned as-is in a
+    blockquote.
+    """
+    if not explanation or explanation == "—":
+        return "> —"
+
+    lines = explanation.split("\n")
+    md_parts: list[str] = []
+    in_deduction = False
+    deduction_lines: list[str] = []
+
+    # Case-insensitive: matches "1. ACTIONABILITY AND PRACTICALITY:" and
+    # "1. Actionability and Practicality:" and anything in between.
+    numbered_re = re.compile(
+        r"^(\d+)\.\s+([\w][^\n:]{2,60}?):\s*(.*)",
+        re.DOTALL | re.IGNORECASE,
+    )
+    # Handles both Unicode → (U+2192) and ASCII -> as verdict separators,
+    # whether inline ("... → Verdict:") or on their own line ("→ Verdict:").
+    _ARROW_RE = re.compile(r"\s*(?:→|->)\s*")
+    # Matches a standalone verdict line that starts with the arrow:
+    #   "→ Verdict: compliant"  or  "-> Verdict: minor violation (-0.10)"
+    _VERDICT_LINE_RE = re.compile(r"^(?:→|->)\s*(Verdict\s*:.*)", re.IGNORECASE)
+
+    def _verdict_emoji(verdict: str) -> str:
+        vl = verdict.lower()
+        if "severe"       in vl: return f"🔴 _{verdict}_"
+        if "significant"  in vl: return f"🟠 _{verdict}_"
+        if "minor"        in vl: return f"🟡 _{verdict}_"
+        return f"🟢 _{verdict}_"
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if line.upper().startswith("DEDUCTION SUMMARY"):
+            in_deduction = True
+            deduction_lines.append(line)
+            continue
+
+        if in_deduction:
+            deduction_lines.append(line)
+            continue
+
+        # Case 1: standalone verdict line "→ Verdict: ..." on its own line.
+        # Non-agentic explanations often put the verdict on a new line after
+        # the assessment text, so the inline arrow split above never fires.
+        vm = _VERDICT_LINE_RE.match(line)
+        if vm:
+            md_parts.append(_verdict_emoji(vm.group(1).strip()))
+            continue
+
+        # Case 2: numbered criterion line "N. CRITERION: assessment [→ Verdict: ...]"
+        m = numbered_re.match(line)
+        if m:
+            num, criterion, rest = m.group(1), m.group(2).strip(), m.group(3).strip()
+            verdict = ""
+            assessment = rest
+            # Verdict may be inline: "... → Verdict: compliant"
+            arrow_split = _ARROW_RE.split(rest, maxsplit=1)
+            if len(arrow_split) == 2:
+                assessment = arrow_split[0].strip()
+                verdict = arrow_split[1].strip()
+            md_parts.append(f"\n**{num}. {criterion.upper()}**")
+            if assessment:
+                md_parts.append(f"{assessment}")
+            if verdict:
+                md_parts.append(_verdict_emoji(verdict))
+        else:
+            md_parts.append(line)
+
+    if deduction_lines:
+        md_parts.append("\n**DEDUCTION SUMMARY**")
+        md_parts.append("```\n" + "\n".join(deduction_lines) + "\n```")
+
+    rendered = "\n".join(md_parts).strip()
+    return rendered if rendered else f"> {explanation}"
+
+
 def extract_urls_from_text(text: str) -> list[str]:
     urls = []
     for m in re.finditer(r'https?://\S+', text or "", re.IGNORECASE):
@@ -193,19 +746,29 @@ def url_to_domain(url: str) -> str:
         return netloc or url
     except: return url
 
-_AX = {"labelFont": "Inter", "titleFont": "Inter", "labelFontSize": 11, "titleFontSize": 11}
+_AX = {"labelFont": "Inter", "titleFont": "Inter", "labelFontSize": 12, "titleFontSize": 12, "labelColor": "#475569", "titleColor": "#334155"}
 
-def _bare(chart, h: int = 260):
+def _bare(chart, h: int = 280):
     """Apply minimal shared styling to a plain (non-faceted) chart."""
     return (
         chart.properties(height=h)
-        .configure_view(strokeOpacity=0)
+        .configure_view(strokeOpacity=0, strokeWidth=0)
         .configure_axis(**_AX)
-        .configure_legend(labelFont="Inter", titleFont="Inter", labelFontSize=11, titleFontSize=11)
+        .configure_legend(
+            labelFont="Inter", titleFont="Inter",
+            labelFontSize=12, titleFontSize=12,
+            labelColor="#475569", titleColor="#334155",
+            padding=8, columnPadding=12,
+        )
     )
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
 st.sidebar.markdown("# 🛡️ Guardrail Explorer")
+st.sidebar.markdown(
+    "<p style='color:#475569;font-size:.82rem;margin-top:-4px;line-height:1.5'>"
+    "Multilingual LLM guardrail evaluation dashboard</p>",
+    unsafe_allow_html=True,
+)
 st.sidebar.markdown("---")
 
 uploaded_files = st.sidebar.file_uploader(
@@ -217,14 +780,27 @@ uploaded_files = st.sidebar.file_uploader(
 
 if not uploaded_files:
     st.markdown("""
-    <div style='max-width:520px;margin:80px auto;text-align:center;'>
-      <div style='font-size:3rem;margin-bottom:12px'>🛡️</div>
-      <h1 style='font-size:1.6rem;color:#0F172A;margin-bottom:10px'>Guardrail Eval Explorer</h1>
-      <p style='color:#64748B;font-size:.95rem;line-height:1.7'>
-        Upload <code>.json</code> output files from your evaluation runs using the sidebar.<br><br>
-        <strong>Single file</strong> — explore scores, scenarios, evidence for one run.<br>
-        <strong>Multiple files</strong> — compare judge models, policies, and languages side by side.
+    <div style='max-width:600px;margin:70px auto;text-align:center;'>
+      <div style='font-size:3.5rem;margin-bottom:18px;line-height:1'>🛡️</div>
+      <h1 style='font-size:1.9rem;color:#0F172A;margin-bottom:12px;letter-spacing:-.02em;border:none;padding:0'>
+        Guardrail Eval Explorer
+      </h1>
+      <p style='color:#64748B;font-size:1.0rem;line-height:1.8;margin-bottom:28px'>
+        Upload <code style='background:#F1F5F9;padding:2px 7px;border-radius:5px;font-size:.93rem'>.json</code>
+        output files from your evaluation runs using the sidebar on the left.
       </p>
+      <div style='display:grid;grid-template-columns:1fr 1fr;gap:14px;text-align:left;margin-top:8px'>
+        <div style='background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:18px 20px'>
+          <div style='font-size:1.4rem;margin-bottom:8px'>📄</div>
+          <div style='font-weight:700;color:#0F172A;font-size:.96rem;margin-bottom:5px'>Single file</div>
+          <div style='color:#64748B;font-size:.88rem;line-height:1.6'>Explore scores, per-criterion verdicts, claim checks, and evidence for one evaluation run.</div>
+        </div>
+        <div style='background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:18px 20px'>
+          <div style='font-size:1.4rem;margin-bottom:8px'>⚖️</div>
+          <div style='font-weight:700;color:#0F172A;font-size:.96rem;margin-bottom:5px'>Multiple files</div>
+          <div style='color:#64748B;font-size:.88rem;line-height:1.6'>Compare judge models, policies, and languages side by side with scatter plots and heatmaps.</div>
+        </div>
+      </div>
     </div>
     """, unsafe_allow_html=True)
     st.stop()
@@ -259,7 +835,7 @@ file_labels: dict[str, str] = {f: _label(f, r) for f, r in raw.items()}
 lc = Counter(file_labels.values())
 for fname in list(file_labels):
     if lc[file_labels[fname]] > 1:
-        file_labels[fname] += f" ({fname[:12]})"
+        file_labels[fname] += f" ({fname[:22]})"
 
 model_list  = list(dict.fromkeys(file_labels.values()))
 model_colors = {m: _PALETTE[i % len(_PALETTE)] for i, m in enumerate(model_list)}
@@ -279,16 +855,26 @@ sel_policies = st.sidebar.multiselect("Policy", all_policies, default=all_polici
 sel_langs    = st.sidebar.multiselect("Language", all_languages, default=all_languages, key="gl")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("**Loaded files**")
+st.sidebar.markdown("### Loaded Files")
 for fname, rows in raw.items():
-    lbl   = file_labels[fname]
-    color = model_colors.get(lbl, "#3B82F6")
-    asst  = rows[0].get("model", "?")
+    lbl      = file_labels[fname]
+    color    = model_colors.get(lbl, "#3B82F6")
+    asst     = rows[0].get("model", "?")
+    web_tool = rows[0].get("web_search_tool", "")
+    search_badge = f"🔍 {web_tool}" if web_tool else ""
+    lang_set = sorted({r.get("language","?") for r in rows})
+    langs_str = " · ".join(lang_set) if lang_set else "?"
     st.sidebar.markdown(
-        f'<span class="chip" style="background:{color}22;color:{color};border:1px solid {color}44">{lbl}</span>',
+        f'<div class="file-card">'
+        f'<span class="chip" style="background:{color}33;color:{color};border:1px solid {color}55;font-size:.78rem;padding:2px 9px">{lbl}</span>'
+        f'<div class="file-card-meta" style="margin-top:7px">'
+        f'<span style="font-family:monospace;font-size:.76rem;color:#475569">{fname[:36]}{"…" if len(fname)>36 else ""}</span><br>'
+        f'{len(rows)} scenarios &nbsp;·&nbsp; {langs_str}'
+        f'{"&nbsp;·&nbsp;" + search_badge if search_badge else ""}'
+        f'<br><span style="color:#475569">asst: {asst}</span>'
+        f'</div></div>',
         unsafe_allow_html=True,
     )
-    st.sidebar.caption(f"`{fname}`  \n{len(rows)} scenarios · asst: {asst}")
 
 # ── UNIFIED FLAT DATAFRAME ─────────────────────────────────────────────────────
 records = []
@@ -309,7 +895,7 @@ for fname, rows in raw.items():
             records.append({
                 "file": fname, "model": model,
                 "id": str(row.get("id", "")), "language": lang, "policy": pol,
-                "scenario": str(row.get("scenario", ""))[:72],
+                "scenario": str(row.get("scenario", ""))[:100],
                 "na_score": na, "ag_score": ag, "delta": dlt,
                 "judgment_changed": changed, "tool_calls": tc,
                 "na_valid": (na > _VALID_THRESHOLD) if na is not None else None,
@@ -343,15 +929,15 @@ with tab_summary:
     n_changed = int(df["judgment_changed"].sum())
 
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Files loaded",        len(raw))
-    k2.metric("Unique scenarios",    df["id"].nunique())
-    k3.metric("Non-ag pass rate",
+    k1.metric("Files", len(raw))
+    k2.metric("Scenarios", df["id"].nunique())
+    k3.metric("Pass — Non-agentic",
               f"{100*sum(1 for s in na_vals if s>_VALID_THRESHOLD)/len(na_vals):.0f}%" if na_vals else "—")
-    k4.metric("Agentic pass rate",
+    k4.metric("Pass — Agentic",
               f"{100*sum(1 for s in ag_vals if s>_VALID_THRESHOLD)/len(ag_vals):.0f}%" if ag_vals else "—",
               delta=f"{(100*sum(1 for s in ag_vals if s>_VALID_THRESHOLD)/len(ag_vals)) - (100*sum(1 for s in na_vals if s>_VALID_THRESHOLD)/len(na_vals)):+.0f}pp" if na_vals and ag_vals else None)
-    k5.metric("Judgments flipped",   f"{n_changed:,}",
-              help="Scenarios where agentic changed the pass/fail verdict")
+    k5.metric("Verdicts Flipped",   f"{n_changed:,}",
+              help="Scenarios where agentic tool access changed the pass/fail verdict")
 
     st.markdown("---")
 
@@ -497,7 +1083,7 @@ with tab_compare:
                      alt.Tooltip("delta:Q",    format="+.3f"),
                      "judgment_changed:N"],
         )
-        st.altair_chart(_bare(diag_ln + thresh_h + thresh_v + scatter, 320), use_container_width=True)
+        st.altair_chart(_bare(diag_ln + thresh_h + thresh_v + scatter, 380), use_container_width=True)
     else:
         st.info("No scenarios with both non-agentic and agentic scores in the current filter.")
 
@@ -548,7 +1134,7 @@ with tab_compare:
         df_h["row_label"] = (
             "[" + df_h["id"].astype(str) + "] "
             + df_h["language"] + " · "
-            + df_h["scenario"].str[:38] + "…"
+            + df_h["scenario"].str[:58] + "…"
         )
         df_h["score_val"] = df_h[score_col]
 
@@ -652,7 +1238,7 @@ with tab_inspect:
         na_s = r.get("na_score"); ag_s = r.get("ag_score"); d = r.get("delta")
         tbl.append({
             "ID": r["id"], "Lang": r["language"], "Model": r["model"], "Policy": r["policy"],
-            "Scenario": r["scenario"][:68],
+            "Scenario": r["scenario"][:100],
             "Non-ag": round(na_s, 3) if na_s is not None else None,
             "✓ non-ag": fmt_valid(score_to_valid(na_s)),
             "Agentic": round(ag_s, 3) if ag_s is not None else None,
@@ -675,31 +1261,33 @@ with tab_inspect:
 
     st.dataframe(
         df_tbl.style.apply(_hl, axis=1).map(_cs, subset=["Non-ag","Agentic"]),
-        use_container_width=True, height=300,
+        use_container_width=True, height=440,
     )
 
     st.markdown("---")
-    st.markdown("### Single scenario deep-dive")
+    st.markdown("### Single Scenario Deep-Dive")
+    st.caption("Select a scenario and file below to see the full judgment — verdicts, criteria breakdown, claim checks, and evidence.")
 
     dc1, dc2, dc3, dc4 = st.columns([3, 1, 2, 2])
     with dc1:
-        all_ids = sorted(df["id"].unique(), key=lambda x: (int(x) if str(x).isdigit() else x))
+        all_ids = sorted(df["id"].unique())
         sel_sid = st.selectbox(
             "Scenario ID", all_ids,
-            format_func=lambda s: f"[{s}] {df[df['id']==s]['scenario'].iloc[0][:52]}…" if not df[df['id']==s].empty else s,
+            format_func=lambda s: f"[{s}] {df[df['id']==s]['scenario'].iloc[0][:70]}…" if not df[df['id']==s].empty else s,
             key="ds",
         )
-    with dc2:
-        avail_langs_d = sorted(df[df["id"] == sel_sid]["language"].unique())
-        sel_lang_d = st.selectbox("Language", avail_langs_d, key="dl")
     with dc3:
         sel_file = st.selectbox("File", list(raw.keys()), format_func=lambda f: file_labels[f], key="df")
     with dc4:
         sel_pol_d = st.selectbox("Policy", all_policies, key="dp") if all_policies else None
 
-    det_rows = [r for r in raw[sel_file] if str(r.get("id","")) == str(sel_sid) and r.get("language","") == sel_lang_d]
+    avail_langs_for_id = sorted({r.get("language", "?") for r in raw[sel_file] if str(r.get("id", "")) == str(sel_sid)})
+    with dc2:
+        sel_lang_d = st.selectbox("Language", avail_langs_for_id, key="dl") if avail_langs_for_id else None
+
+    det_rows = [r for r in raw[sel_file] if str(r.get("id","")) == str(sel_sid) and (not sel_lang_d or r.get("language") == sel_lang_d)]
     if not det_rows:
-        st.warning(f"Scenario {sel_sid} (language: {sel_lang_d}) not found in {file_labels[sel_file]}.")
+        st.warning(f"Scenario {sel_sid} not found in {file_labels[sel_file]}.")
     elif not sel_pol_d:
         st.warning("No policy selected.")
     else:
@@ -709,9 +1297,9 @@ with tab_inspect:
         # Scenario + Response
         s1, s2 = st.columns(2)
         with s1:
-            st.markdown('<p class="label-sm">Scenario</p>', unsafe_allow_html=True)
+            st.markdown('<p class="label-sm">User Scenario</p>', unsafe_allow_html=True)
             st.info(det.get("scenario","—"))
-            st.caption(f"Language: **{det.get('language','?')}** · ID: {det.get('id','?')}")
+            st.caption(f"Language: **{det.get('language','?')}** &nbsp;·&nbsp; ID: `{det.get('id','?')}`")
         with s2:
             st.markdown('<p class="label-sm">Assistant Response</p>', unsafe_allow_html=True)
             st.success(det.get("assistant_response","—"))
@@ -734,22 +1322,155 @@ with tab_inspect:
                 unsafe_allow_html=True,
             )
 
-        v1, _mid, v2 = st.columns([5,1,5])
+        # ── Read categorical fields (derive from score if absent / old data) ──
+        na_overall = _derive_verdict(na_s, det.get(f"{lbl}_nonagentic_overall_verdict",""))
+        ag_overall = _derive_verdict(ag_s, det.get(f"{lbl}_agentic_overall_verdict",""))
+        na_conf    = _derive_confidence(na_s, det.get(f"{lbl}_nonagentic_confidence",""))
+        ag_conf    = _derive_confidence(ag_s, det.get(f"{lbl}_agentic_confidence",""))
+        na_cv      = ensure_list(det.get(f"{lbl}_nonagentic_criteria_verdicts", []))
+        ag_cv      = ensure_list(det.get(f"{lbl}_agentic_criteria_verdicts", []))
+        tool_changed = ensure_list(det.get(f"{lbl}_agentic_tool_changed_verdict_for", []))
+
+        # Fallback: if criteria_verdicts absent, parse from explanation text.
+        # This handles data run before categorical output was added, or cases
+        # where the judge produced old-format JSON without the structured list.
+        ag_expl_raw = det.get(f"{lbl}_agentic_explanation", "") or ""
+        na_expl_raw = det.get(f"{lbl}_nonagentic_explanation", "") or ""
+        _ag_parsed = False
+        _na_parsed = False
+        if not ag_cv and ag_expl_raw:
+            ag_cv = _parse_verdicts_from_explanation(ag_expl_raw)
+            _ag_parsed = bool(ag_cv)
+        if not na_cv and na_expl_raw:
+            na_cv = _parse_verdicts_from_explanation(na_expl_raw)
+            _na_parsed = bool(na_cv)
+        ag_improvements = ensure_list(det.get(f"{lbl}_agentic_improvements", []))
+        na_improvements = ensure_list(det.get(f"{lbl}_nonagentic_improvements", []))
+        all_improvements = ag_improvements or na_improvements
+
+        # Maps verdict → solid badge class (white text on colored bg)
+        _BADGE_CLS = {
+            "COMPLIANT":  "badge-compliant",
+            "MINOR_ISSUE":"badge-minor",
+            "MAJOR_ISSUE":"badge-major",
+            "CRITICAL":   "badge-critical",
+        }
+        _BADGE_ICON = {"COMPLIANT":"✓","MINOR_ISSUE":"!","MAJOR_ISSUE":"!!","CRITICAL":"✕"}
+
+        def _crit_badge(verdict: str) -> str:
+            cls  = _BADGE_CLS.get(verdict, "badge-empty")
+            icon = _BADGE_ICON.get(verdict, "·")
+            label = verdict.replace("_", " ") if verdict not in ("—","") else "—"
+            return f'<span class="crit-badge {cls}">{icon} {label}</span>'
+
+        # ── PRIMARY: verdict hero side-by-side ────────────────────────────────
+        v1, _mid, v2 = st.columns([5, 1, 5])
         with v1:
-            st.markdown('<p class="label-sm">🔒 Non-agentic · single LLM call · no tools</p>', unsafe_allow_html=True)
-            st.markdown(f'<div class="score-big" style="color:{score_color(na_s)}">{f"{na_s:.3f}" if na_s is not None else "—"}</div>', unsafe_allow_html=True)
-            st.markdown(fmt_valid_html(score_to_valid(na_s)), unsafe_allow_html=True)
-            st.markdown(f"> {det.get(f'{lbl}_nonagentic_explanation','—')}")
+            st.markdown(
+                '<p class="label-sm">🔒 Non-agentic · single LLM call · no tools</p>',
+                unsafe_allow_html=True)
+            st.markdown(_verdict_html(na_overall), unsafe_allow_html=True)
+            st.markdown(_conf_html(na_conf), unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="score-secondary">Score: '
+                f'<b style="color:{score_color(na_s)}">'
+                f'{f"{na_s:.3f}" if na_s is not None else "—"}</b></div>',
+                unsafe_allow_html=True,
+            )
+
         with _mid:
-            st.markdown("<br><br><br><div style='text-align:center;font-size:1.5rem;color:#CBD5E1'>↔</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div style='text-align:center;font-size:1.2rem;color:#CBD5E1;padding-top:16px'>↔</div>",
+                unsafe_allow_html=True)
+
         with v2:
-            st.markdown(f'<p class="label-sm">🌐 Agentic · {tc} tool call(s)</p>', unsafe_allow_html=True)
-            st.markdown(f'<div class="score-big" style="color:{score_color(ag_s)}">{f"{ag_s:.3f}" if ag_s is not None else "—"}</div>', unsafe_allow_html=True)
-            st.markdown(fmt_valid_html(score_to_valid(ag_s)), unsafe_allow_html=True)
-            if dlt is not None:
-                dc = "#10B981" if dlt > 0.01 else ("#EF4444" if dlt < -0.01 else "#94A3B8")
-                st.markdown(f'<span style="color:{dc};font-weight:600;font-size:.9rem">{delta_arrow(dlt)} vs non-agentic</span>', unsafe_allow_html=True)
-            st.markdown(f"> {det.get(f'{lbl}_agentic_explanation','—')}")
+            st.markdown(
+                f'<p class="label-sm">🌐 Agentic · {tc} tool call(s)</p>',
+                unsafe_allow_html=True)
+            st.markdown(_verdict_html(ag_overall), unsafe_allow_html=True)
+            st.markdown(_conf_html(ag_conf), unsafe_allow_html=True)
+            _dc = "#059669" if (dlt or 0)>0.01 else ("#DC2626" if (dlt or 0)<-0.01 else "#94A3B8")
+            _delta_html = (f' &ensp;<b style="color:{_dc};font-size:.85rem">{delta_arrow(dlt)}</b>' if dlt is not None else "")
+            st.markdown(
+                f'<div class="score-secondary">Score: '
+                f'<b style="color:{score_color(ag_s)}">'
+                f'{f"{ag_s:.3f}" if ag_s is not None else "—"}</b>{_delta_html}</div>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("---")
+
+        # ── SECONDARY: per-criterion categorical table ────────────────────────
+        na_map = {cv.get("criterion","?"): cv for cv in na_cv}
+        ag_map = {cv.get("criterion","?"): cv for cv in ag_cv}
+        all_criteria = list(dict.fromkeys(list(na_map) + list(ag_map)))
+
+        if all_criteria:
+            na_hdr_suffix = " <i>(parsed)</i>" if _na_parsed else ""
+            ag_changed_note = (
+                f' &nbsp;<span class="changed-tag">⚡ {len(tool_changed)} changed by tools</span>'
+                if tool_changed else (" <i>(parsed)</i>" if _ag_parsed else "")
+            )
+            hdr1, hdr2, hdr3 = st.columns([3, 2, 2])
+            hdr1.markdown('<p class="label-sm">Policy criterion</p>', unsafe_allow_html=True)
+            hdr2.markdown(f'<p class="label-sm">Non-agentic{na_hdr_suffix}</p>', unsafe_allow_html=True)
+            hdr3.markdown(f'<p class="label-sm">Agentic{ag_changed_note}</p>', unsafe_allow_html=True)
+
+            for crit in all_criteria:
+                na_v   = na_map.get(crit, {})
+                ag_v   = ag_map.get(crit, {})
+                na_vrd = na_v.get("verdict", "—")
+                ag_vrd = ag_v.get("verdict", "—")
+                changed = crit in tool_changed
+                c1, c2, c3 = st.columns([3, 2, 2])
+                with c1:
+                    name_cls = "crit-name-changed" if changed else "crit-name"
+                    change_tag = '<span class="changed-tag">⚡ changed</span>' if changed else ""
+                    st.markdown(
+                        f'<div class="{name_cls}">{crit} {change_tag}</div>',
+                        unsafe_allow_html=True)
+                with c2:
+                    st.markdown(_crit_badge(na_vrd), unsafe_allow_html=True)
+                with c3:
+                    st.markdown(_crit_badge(ag_vrd), unsafe_allow_html=True)
+
+                imps = ag_v.get("improvements") or []
+                for imp in imps:
+                    if imp.strip():
+                        st.markdown(
+                            f'<div class="impr-inline">{imp}</div>',
+                            unsafe_allow_html=True)
+            st.markdown("")
+
+        # ── Improvements list ─────────────────────────────────────────────────
+        if all_improvements:
+            impr_lines = "".join(
+                f'<div class="impr-item">{imp}</div>'
+                for imp in all_improvements if imp.strip()
+            )
+            st.markdown(
+                f'<div class="impr-section">'
+                f'<div class="impr-section-title">Improvements required for compliance</div>'
+                f'{impr_lines}</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("")
+
+        st.markdown("---")
+
+        # ── DETAIL: explanation text in expander ──────────────────────────────
+        na_expl = det.get(f"{lbl}_nonagentic_explanation", "—") or "—"
+        ag_expl = det.get(f"{lbl}_agentic_explanation", "—") or "—"
+        with st.expander("Explanation detail — full reasoning", expanded=not bool(all_criteria)):
+            ed1, _gap, ed2 = st.columns([5, 1, 5])
+            with ed1:
+                st.markdown('<p class="label-sm">Non-agentic reasoning</p>', unsafe_allow_html=True)
+                st.markdown(_render_explanation(na_expl))
+            with _gap:
+                st.markdown("")
+            with ed2:
+                st.markdown('<p class="label-sm">Agentic reasoning</p>', unsafe_allow_html=True)
+                st.markdown(_render_explanation(ag_expl))
 
         st.markdown("---")
 
@@ -779,30 +1500,55 @@ with tab_inspect:
             with st.expander(f"Tool call log — {len(tool_log)} calls", expanded=False):
                 for i, call in enumerate(tool_log, 1):
                     tn = call.get("tool","?"); inp = call.get("input",{}); prev = call.get("output_preview","")
-                    icon3 = {"search_web":"🔎","fetch_url":"📄","check_url_validity":"🔗"}.get(tn,"🔧")
+                    icon3 = {"search_web":"🔎","fetch_url":"📄","check_url_validity":"🔗","check_acronym":"🔤"}.get(tn,"🔧")
                     lc1, lc2 = st.columns(2)
                     with lc1:
                         st.markdown(f"**{icon3} {i}. `{tn}`**")
                         if isinstance(inp, dict):
                             u = inp.get("url",""); q = inp.get("query","")
-                            if u: st.markdown(f"[{u}]({u})")
-                            elif q: st.code(q)
-                            else: st.code(json.dumps(inp, ensure_ascii=False)[:200])
+                            acr = inp.get("acronym",""); exp = inp.get("claimed_expansion","")
+                            lang = inp.get("context_language","")
+                            if u:
+                                st.markdown(f"[{u}]({u})")
+                            elif q:
+                                st.code(q)
+                            elif acr:
+                                lang_tag = f" `[{lang}]`" if lang else ""
+                                st.markdown(f"**`{acr}`**{lang_tag}")
+                                st.caption(f"claimed: _{exp}_")
+                            else:
+                                st.code(json.dumps(inp, ensure_ascii=False)[:200])
                     with lc2:
                         try:
                             p = json.loads(prev) if isinstance(prev, str) else prev
                             if tn=="search_web" and isinstance(p, list):
-                                for res in p[:3]:
+                                for res in p:
                                     ur = res.get("url",""); ti = res.get("title",ur); sn = res.get("snippet","")
                                     if ur: st.markdown(f"**[{ti}]({ur})**")
-                                    if sn: st.caption(sn[:150])
+                                    if sn: st.caption(sn)
+                            elif tn=="fetch_url" and isinstance(p, dict):
+                                content = p.get("content","")
+                                if content: st.text(content)
                             elif tn=="check_url_validity" and isinstance(p, dict):
                                 vf = p.get("valid",False); sc2 = p.get("status_code","?")
                                 st.markdown(f"{'✅ Valid' if vf else '❌ Invalid'} — HTTP **{sc2}**")
                                 if p.get("error"): st.error(p["error"])
+                            elif tn=="check_acronym" and isinstance(p, dict):
+                                hint = p.get("verdict_hint","unclear")
+                                score_v = p.get("match_score", 0.0)
+                                acr = p.get("acronym",""); exp = p.get("claimed_expansion","")
+                                hint_icon = {"likely_correct":"✅","likely_wrong":"❌"}.get(hint,"⚠️")
+                                st.markdown(f"{hint_icon} **{hint}** (match score: {score_v:.0%})")
+                                st.caption(f"`{acr}` claimed as: _{exp}_")
+                                if p.get("error"): st.warning(p["error"])
+                                srcs = p.get("search_results",[])
+                                for res in srcs:
+                                    ur = res.get("url",""); sn = res.get("snippet","")
+                                    if ur: st.markdown(f"[{ur}]({ur})")
+                                    if sn: st.caption(sn)
                             else:
-                                st.code(json.dumps(p, ensure_ascii=False)[:400])
-                        except: st.text(str(prev)[:300])
+                                st.code(json.dumps(p, ensure_ascii=False, indent=2))
+                        except: st.text(str(prev))
                     if i < len(tool_log):
                         st.markdown('<hr style="border:none;border-top:1px solid #F1F5F9;margin:6px 0">', unsafe_allow_html=True)
 

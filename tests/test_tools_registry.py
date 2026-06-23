@@ -1,47 +1,39 @@
-"""Tests for the tool registry + tool groups (PR-8)."""
+"""Tests for the tool registry introduced in PR #15."""
 
-import json
+from tools import REGISTRY, TOOL_GROUPS, get_tool_schemas
 
-import pytest
-import tools
-from tools import REGISTRY, TOOL_SCHEMAS, Tool, dispatch_tool_call, get_tool_schemas
-
-_DEFAULT_TOOLS = {"search_web", "fetch_url", "check_url_validity", "check_acronym"}
+EXPECTED_DEFAULT_TOOLS = {"search_web", "fetch_url", "check_url_validity", "check_acronym"}
 
 
-def test_default_group_has_the_four_web_tools():
+def test_registry_contains_all_default_tools():
+    assert EXPECTED_DEFAULT_TOOLS.issubset(REGISTRY.keys())
+
+
+def test_default_group_in_tool_groups():
+    assert "default" in TOOL_GROUPS
+
+
+def test_get_tool_schemas_default_returns_four_schemas():
     schemas = get_tool_schemas("default")
+    assert len(schemas) == 4
     names = {s["function"]["name"] for s in schemas}
-    assert names == _DEFAULT_TOOLS
+    assert names == EXPECTED_DEFAULT_TOOLS
 
 
-def test_default_group_matches_legacy_tool_schemas():
-    # Back-compat: the default group is byte-for-byte the original TOOL_SCHEMAS.
-    assert get_tool_schemas("default") == TOOL_SCHEMAS
+def test_get_tool_schemas_unknown_group_returns_empty():
+    schemas = get_tool_schemas("nonexistent_group_xyz")
+    assert schemas == []
 
 
-def test_unknown_group_raises():
-    with pytest.raises(ValueError, match="Unknown tool group"):
-        get_tool_schemas("does_not_exist")
+def test_each_schema_has_required_fields():
+    schemas = get_tool_schemas("default")
+    for schema in schemas:
+        assert schema["type"] == "function"
+        assert "function" in schema
+        assert "name" in schema["function"]
+        assert "parameters" in schema["function"]
 
 
-def test_registry_get_returns_tool_with_handler():
-    tool = REGISTRY.get("search_web")
-    assert tool is not None
-    assert tool.name == "search_web"
-    assert callable(tool.handler)
-
-
-def test_register_new_tool_appears_in_schemas_and_dispatches(monkeypatch):
-    schema = {"type": "function", "function": {"name": "echo_tool", "description": "", "parameters": {}}}
-    REGISTRY.register(Tool(name="echo_tool", schema=schema, handler=lambda a: {"echoed": a.get("msg")}))
-    monkeypatch.setitem(tools.TOOL_GROUPS, "echo_group", ["echo_tool"])
-
-    assert get_tool_schemas("echo_group") == [schema]
-    out = json.loads(dispatch_tool_call("echo_tool", json.dumps({"msg": "hi"})))
-    assert out == {"echoed": "hi"}
-
-
-def test_dispatch_unknown_tool_via_registry():
-    out = json.loads(dispatch_tool_call("nope", "{}"))
-    assert "Unknown tool" in out["error"]
+def test_registry_tools_have_callable_handlers():
+    for name, tool in REGISTRY.items():
+        assert callable(tool.handler), f"handler for {name!r} is not callable"

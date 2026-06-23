@@ -6,7 +6,13 @@ from tools import get_tool_schemas
 
 def test_humanitarian_group_registered():
     names = [s["function"]["name"] for s in get_tool_schemas("humanitarian")]
-    assert names == ["search_web", "reliefweb_situation", "disaster_alert", "health_advisory", "aid_org_verify"]
+    assert names == [
+        "search_web",
+        "reliefweb_situation",
+        "disaster_alert",
+        "health_advisory",
+        "aid_org_verify",
+    ]
 
 
 def test_disaster_alert_filters_and_parses_gdacs(monkeypatch):
@@ -23,7 +29,14 @@ def test_disaster_alert_filters_and_parses_gdacs(monkeypatch):
                     "description": "Severe",
                 }
             },
-            {"properties": {"eventtype": "EQ", "name": "Quake", "alertlevel": "Green", "country": "Chile"}},
+            {
+                "properties": {
+                    "eventtype": "EQ",
+                    "name": "Quake",
+                    "alertlevel": "Green",
+                    "country": "Chile",
+                }
+            },
         ]
     }
     monkeypatch.setattr(tools, "_http_json", lambda *a, **k: fake)
@@ -37,7 +50,9 @@ def test_disaster_alert_filters_and_parses_gdacs(monkeypatch):
 
 def test_health_advisory_parses_who_indicators(monkeypatch):
     monkeypatch.setattr(
-        tools, "_http_json", lambda *a, **k: {"value": [{"IndicatorCode": "C1", "IndicatorName": "Cholera deaths"}]}
+        tools,
+        "_http_json",
+        lambda *a, **k: {"value": [{"IndicatorCode": "C1", "IndicatorName": "Cholera deaths"}]},
     )
     result = tools.health_advisory("cholera")
     assert result["who_indicators"] == [{"code": "C1", "name": "Cholera deaths"}]
@@ -74,7 +89,13 @@ def test_aid_org_verify_confirms_vetted_source(monkeypatch):
     monkeypatch.setenv("RELIEFWEB_APPNAME", "approved")
     fake = {
         "data": [
-            {"fields": {"name": "Norwegian Refugee Council", "homepage": "https://nrc.no", "type": {"name": "NGO"}}}
+            {
+                "fields": {
+                    "name": "Norwegian Refugee Council",
+                    "homepage": "https://nrc.no",
+                    "type": {"name": "NGO"},
+                }
+            }
         ]
     }
     monkeypatch.setattr(tools, "_http_json", lambda *a, **k: fake)

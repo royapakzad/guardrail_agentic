@@ -14,15 +14,18 @@ API keys are read automatically from environment variables:
   - CEREBRAS_API_KEY     (cerebras)
   Ollama runs locally and needs no key.
 
+PR #14: calls are optionally routed through the Otari gateway when
+LLM_GATEWAY=otari is set. See llm_gateway.py.
+
 Install:
-  pip install 'any-llm-sdk[openai,anthropic,google,mistral]'
+  pip install 'any-llm-sdk[openai,anthropic,gemini,mistral]'
   pip install 'any-llm-sdk[all]'   # all providers
 """
 
 from __future__ import annotations
 
 from any_llm import completion as _completion
-from llm_gateway import resolve_completion_kwargs
+from llm_gateway import resolve_completion_kwargs  # PR #14
 
 SUPPORTED_PROVIDERS = (
     "openai",
@@ -48,24 +51,26 @@ def call_llm(
     Plain chat completion (no tools). Returns the assistant message content.
 
     Args:
-        provider:     any-llm provider name, e.g. "openai", "anthropic", "gemini".
-        model:        Model identifier understood by that provider,
-                      e.g. "gpt-5-mini", "claude-sonnet-4-6", "gemini-2.5-flash".
+        provider:      any-llm provider name, e.g. "openai", "anthropic", "gemini".
+        model:         Model identifier understood by that provider.
         system_prompt: System message text.
         user_message:  User turn text.
         temperature:   Sampling temperature. Defaults to None (use the model's
-                       default). Some models (e.g. gpt-5-mini, o-series) reject
-                       any explicit temperature value and require the default.
+                       default). Some models reject any explicit temperature value.
     """
+    # PR #14: gateway overrides (empty dict in direct mode — no-op)
+    gateway_overrides = resolve_completion_kwargs(provider, model)
+
     kwargs: dict = {
-        **resolve_completion_kwargs(provider=provider.lower(), model=model),
+        "provider": provider.lower(),
+        "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ],
     }
-    # Only send temperature when explicitly set — models like gpt-5-mini and
-    # the o-series reject temperature=0.0 and require the API default.
+    kwargs.update(gateway_overrides)
+
     if temperature is not None:
         kwargs["temperature"] = temperature
 

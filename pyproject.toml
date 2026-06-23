@@ -1,22 +1,20 @@
 [project]
-name = "guardrail-agentic"
+name = "guardrails-multi-search"
 version = "0.1.0"
-description = "Research toolkit comparing agentic vs non-agentic LLM guardrail evaluation on multilingual safety scenarios."
-readme = "README.md"
-requires-python = ">=3.12,<3.14"
+description = "Multilingual LLM guardrail evaluation toolkit"
+requires-python = ">=3.12"
 dependencies = [
-    # Dashboard + data (Part A and Part B)
-    "streamlit>=1.35.0",            # interactive results dashboard (visualize_results.py)
-    "pandas>=2.0.0",                # tables in the dashboard
-    # Guardrail + LLM interface
+    # Guardrail backends (PR #12: bumped 0.2.2 → 0.5.1)
     "any-guardrail[flowjudge,huggingface]==0.5.1",
-    "any-llm-sdk[openai,anthropic,gemini,mistral]>=1.7.0",  # any-guardrail 0.5.1 requires any-llm-sdk>=1.7.0
-                                                            # (extra is `gemini`, not `google`; pulls google-genai)
+    # PR #8 fix: google extra does not exist; correct name is gemini
+    # PR #12: <1 → >=1.7.0 (required by any-guardrail 0.5.x)
+    # PR #14: platform extra enables transparent Otari usage-tracking integration
+    "any-llm-sdk[openai,anthropic,gemini,mistral,platform]>=1.7.0",
     "python-dotenv==1.2.1",
     # Numerical / scientific
     "numpy==2.2.6",
     "scipy==1.16.3",
-    # HuggingFace stack (local guardrail models: FlowJudge, etc.)
+    # HuggingFace stack
     "transformers==4.57.3",
     "huggingface_hub==0.36.0",
     # Deep learning backend
@@ -24,72 +22,64 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Retrieval tools for the agentic guardrail path (Part B).
-# Install with: uv sync --extra agentic
+# Install for the agentic retrieval path:
+#   uv sync --extra agentic
 agentic = [
-    "ddgs>=6.0.0",            # DuckDuckGo backend (default; no API key)
-    "requests>=2.31.0",       # SearXNG JSON API, fetch_url, check_url_validity
-    "trafilatura>=2.0.0",     # main-content extraction (clean text, no boilerplate) for fetch_url
-    "beautifulsoup4>=4.12.0", # fallback HTML → text extraction for the DDG/SearXNG fetch path
-    "tavily-python>=0.3.0",   # Tavily backend (managed search + extract API)
-    "tiktoken>=0.7.0",        # exact token counts for the non-agentic path
+    "ddgs>=6.0.0",
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "trafilatura>=2.0.0",      # PR #16: clean article-text extraction
+    "tavily-python>=0.3.0",
+    "tiktoken>=0.7.0",
 ]
-# Linters / type checker / pre-commit (mirrors mozilla-ai/any-llm tooling).
-# Install with: uv sync --extra dev
+# Install for the Streamlit results dashboard:
+#   uv sync --extra dashboard
+dashboard = [
+    "streamlit>=1.35.0",
+    "pandas>=2.0.0",
+]
+# Install for development (lint, type-check, tests):
+#   uv sync --extra dev
 dev = [
-    "ruff==0.15.12",
-    "mypy>=1.10",
-    "pre-commit>=3.7",
-    "pytest>=8.0",
-    "types-requests",
-    "types-beautifulsoup4",
-]
-# Route LLM calls through the Otari gateway (mozilla-ai/otari). Only needed when
-# LLM_GATEWAY=otari; direct-provider mode requires nothing here.
-# Install with: uv sync --extra otari
-otari = [
-    "otari>=0.0.3",
+    "pytest>=8.0.0",
+    "pytest-mock>=3.14.0",
+    "ruff>=0.15.12",
+    "mypy>=1.11.0",
+    "pre-commit>=3.8.0",
+    "guardrails-multi-search[agentic]",
 ]
 
-# This is a flat-layout research toolkit run as scripts (modules import each other
-# by bare name via sys.path), not an installable library — so uv manages the
-# environment without trying to build/install the project itself.
-[tool.uv]
-package = false
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-# ── Ruff (lint + format) ──────────────────────────────────────────────────────
-# Line length and tooling version match any-llm. Rule selection is intentionally
-# moderate (not any-llm's `extend-select = ["ALL"]`) so the first lint pass stays
-# reviewable on an existing research codebase; it can be ratcheted up over time.
+[tool.hatch.build.targets.wheel]
+packages = ["agentic_guardrails"]
+
+# ── ruff ──────────────────────────────────────────────────────────────────────
 [tool.ruff]
-line-length = 120
+line-length = 100
 target-version = "py312"
-# Exclude the Streamlit dashboard and the standalone demo script (dense, one-liner
-# style) — matches any-llm's "exclude demos|scripts" convention and the mypy exclude.
-extend-exclude = ["visualize_results.py", "agentic_guardrails/demo_guardrail_log.py"]
+exclude = ["visualize_results.py", "demo_guardrail_log.py"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+# Moderate rule set — ratchet up later
+select = ["E", "F", "W", "I", "UP", "B"]
 ignore = [
-    "E501",  # line length: prompts/docstrings are long by design; formatter handles code
-    "E402",  # module import not at top: the flat-script layout sets sys.path before imports
-    "B008",  # function calls in argument defaults (not used dangerously here)
-    "SIM105", # contextlib.suppress vs try/except-pass — readability preference
+    "E501",   # line too long (handled by formatter)
+    "B008",   # function call in default args
 ]
 
+[tool.ruff.format]
+quote-style = "double"
+
 # ── mypy ──────────────────────────────────────────────────────────────────────
-# Lenient to start (third-party libs are untyped); excludes demos/dashboard.
-# Tighten toward any-llm's `strict = true` incrementally in later PRs.
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
-warn_unused_ignores = false
-exclude = [
-    "agentic_guardrails/demo_guardrail_log.py",
-    "visualize_results.py",
-]
+warn_unused_ignores = true
 
 # ── pytest ────────────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+pythonpath = ["agentic_guardrails"]

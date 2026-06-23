@@ -1,20 +1,34 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Environments
-.venv/
+# ── Environment & secrets ─────────────────────────────────────────────────────
 .env
+.env.*
+!.env_example
 
-# uv
-# (uv.lock IS committed; only the venv is ignored)
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
 
-# Per-run logs from the agentic runner
-*_logs/
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
 
-# OS / editor
-.DS_Store
+# ── uv ────────────────────────────────────────────────────────────────────────
+.uv/
+
+# ── OS files ──────────────────────────────────────────────────────────────────
+*.DS_Store
+data/.DS_Store
+
+# ── Output files (large, generated) ──────────────────────────────────────────
+outputs/
+Final_outputs/
+
+# ── Docs (generated, not tracked) ────────────────────────────────────────────
+IMPROVEMENTS.md
+ANALYSIS.md

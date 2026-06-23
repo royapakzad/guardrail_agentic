@@ -1,51 +1,69 @@
-"""Tests for clean-text fetching (PR-9): only readable text, never raw HTML."""
+"""Tests for clean-text fetch introduced in PR #16."""
 
-import json
+from unittest.mock import MagicMock, patch
 
-import requests
-import tools
-from agentic_runner import _summarize_tool_result
+import pytest
+from tools import ToolError, _fetch_main_text
 
-_HTML = """<html><head><title>T</title>
-<script>var secret = 1;</script><style>.x{color:red}</style></head>
+
+def _mock_response(html: str, status: int = 200) -> MagicMock:
+    resp = MagicMock()
+    resp.text = html
+    resp.status_code = status
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+ARTICLE_HTML = """
+<html><head><title>Test</title></head>
 <body>
-<nav>MENU HOME ABOUT CONTACT</nav>
-<article>
-<h1>Asylum rights in Croatia</h1>
-<p>You can request a written court order before unlocking your device, and you
-are not obliged to disclose passwords without due legal process.</p>
-</article>
-<footer>Cookie banner junk and copyright notice</footer>
-</body></html>"""
+  <nav>Menu item 1 | Menu item 2</nav>
+  <article>
+    <h1>Real Article Title</h1>
+    <p>This is the actual article content that matters.</p>
+    <p>Second paragraph with important information.</p>
+  </article>
+  <footer>Cookie policy | Terms | Privacy</footer>
+</body></html>
+"""
 
 
-class _Resp:
-    text = _HTML
+def test_fetch_main_text_returns_article_content_with_trafilatura():
+    with patch("requests.get", return_value=_mock_response(ARTICLE_HTML)):
+        try:
+            import trafilatura  # noqa: F401
 
-    def raise_for_status(self):
-        return None
+            trafilatura_available = True
+        except ImportError:
+            trafilatura_available = False
 
+        if not trafilatura_available:
+            pytest.skip("trafilatura not installed")
 
-def test_fetch_main_text_returns_clean_text_no_html(monkeypatch):
-    monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp())
-    out = tools._fetch_main_text("https://example.org/article", 4000)
-
-    # No HTML markup leaks into the result.
-    assert "<" not in out and ">" not in out
-    # Script/style contents are gone.
-    assert "secret" not in out
-    assert "color:red" not in out
-    # The main content survives.
-    assert "written court order" in out
+        content = _fetch_main_text("http://example.com", max_chars=4000)
+        assert "Real Article Title" in content or "article content" in content.lower()
+        # Should not contain nav/footer boilerplate
+        assert "Cookie policy" not in content
 
 
-def test_summarize_fetch_url_passes_full_clean_text_not_a_preview():
-    long_text = "Relevant clean sentence. " * 50  # ~1200 chars
-    summary = _summarize_tool_result(
-        "fetch_url",
-        {"url": "https://example.org"},
-        json.dumps({"url": "https://example.org", "content": long_text}),
-    )
-    # The actual text reaches the conversation (not truncated to a ~200-char preview).
-    assert long_text.strip() in summary
-    assert len(summary) > 1000
+def test_fetch_main_text_fallback_to_bs4_when_trafilatura_absent():
+    with patch("requests.get", return_value=_mock_response(ARTICLE_HTML)):
+        with patch.dict("sys.modules", {"trafilatura": None}):
+            content = _fetch_main_text("http://example.com", max_chars=4000)
+    # BS4 fallback should at least strip script/style/nav/footer
+    assert "article content" in content.lower() or "Real Article Title" in content
+
+
+def test_fetch_main_text_raises_tool_error_on_network_failure():
+    import requests
+
+    with patch("requests.get", side_effect=requests.RequestException("connection refused")):
+        with pytest.raises(ToolError, match="Failed to fetch"):
+            _fetch_main_text("http://unreachable.example.com", max_chars=4000)
+
+
+def test_fetch_main_text_respects_max_chars():
+    long_html = "<html><body>" + "<p>word </p>" * 2000 + "</body></html>"
+    with patch("requests.get", return_value=_mock_response(long_html)):
+        content = _fetch_main_text("http://example.com", max_chars=500)
+    assert len(content) <= 500

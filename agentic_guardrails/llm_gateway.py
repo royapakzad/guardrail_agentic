@@ -1,78 +1,124 @@
 """
 llm_gateway.py
 --------------
-Single switch for routing every LLM completion through the Otari gateway
-(mozilla-ai/otari) instead of calling each provider directly.
+Optional Otari gateway routing for all LLM completions (PR #14).
 
-Otari is an OpenAI-compatible LLM gateway built on any-llm — it adds virtual API
-keys, budgets, and usage tracking in front of the real providers. any-llm v1 ships
-a native ``otari`` provider, so routing through it is just a matter of rewriting the
-``provider``/``model`` that we hand to ``any_llm.completion``.
+How Otari routing works:
+    The `otari` Python SDK routes calls through the Otari hosted gateway at
+    https://api.otari.ai (default) or a self-hosted instance.
 
-Usage: every completion call site builds its kwargs via ``resolve_completion_kwargs``:
+    To enable:
+      1. Go to your Otari dashboard → Providers → add your provider API keys
+         (Anthropic, OpenAI, etc.) so Otari can forward calls.
+      2. Go to Otari dashboard → API Keys → generate a platform token.
+      3. Set in your .env:
+             LLM_GATEWAY=otari
+             OTARI_AI_TOKEN=<token from dashboard>
+      4. Optionally set OTARI_API_BASE to override the default https://api.otari.ai.
 
-    from llm_gateway import resolve_completion_kwargs
-    resp = completion(**resolve_completion_kwargs(provider="openai", model="gpt-5-nano"),
-                      messages=[...])
+    When active, every completion call is rewritten as:
+        provider="otari", model="<orig_provider>:<orig_model>"
+    and the `otari` SDK forwards it through the gateway using your OTARI_AI_TOKEN.
 
-Configuration (environment / .env):
-    LLM_GATEWAY=direct        # default — call providers directly (unchanged behavior)
-    LLM_GATEWAY=otari         # route everything through the gateway
-    OTARI_API_BASE=http://localhost:8000/v1
-    OTARI_API_KEY=<virtual key>          # (or OTARI_PLATFORM_TOKEN for hosted otari.ai)
+    Leave LLM_GATEWAY unset to call providers directly (default).
 
-If ``LLM_GATEWAY=otari`` but no ``OTARI_API_BASE`` is configured, calls fall back to
-direct mode so a missing gateway never breaks a run. Legacy ``GATEWAY_API_BASE`` /
-``GATEWAY_API_KEY`` env names are also accepted (any-llm's pre-Otari naming).
+Exports:
+    resolve_completion_kwargs(provider, model) -> dict
+        Returns {} in direct mode (no-op).
+        Returns {"provider": "otari", "model": "<provider>:<model>"} in Otari mode.
+        Emits RuntimeWarning if OTARI_AI_TOKEN is missing so misconfiguration
+        is caught early without breaking a run.
 """
 
 from __future__ import annotations
 
 import os
-
-# any-llm's native gateway provider name.
-_OTARI_PROVIDER = "otari"
-
-
-def gateway_mode() -> str:
-    """Return the configured gateway mode: 'otari' or 'direct' (default)."""
-    return os.getenv("LLM_GATEWAY", "direct").strip().lower()
+import warnings
+from typing import Any
 
 
-def _otari_api_base() -> str | None:
-    return os.getenv("OTARI_API_BASE") or os.getenv("GATEWAY_API_BASE")
-
-
-def _otari_api_key() -> str | None:
-    return os.getenv("OTARI_API_KEY") or os.getenv("GATEWAY_API_KEY")
-
-
-def resolve_completion_kwargs(*, provider: str, model: str) -> dict[str, str]:
+def _patch_otari_provider() -> None:
     """
-    Map a (provider, model) pair to the kwargs ``any_llm.completion`` should receive.
-
-    - direct mode (default): ``{"provider": provider, "model": model}`` — unchanged.
-    - otari mode: route through the gateway as
-      ``{"provider": "otari", "model": "<provider>:<model>", "api_base": ..., "api_key": ...}``.
-      The gateway expects the real upstream as a ``provider:model`` string.
-
-    Falls back to direct mode when otari is requested but ``OTARI_API_BASE`` is unset,
-    so a missing/unconfigured gateway never breaks a run.
+    Monkey-patch any-llm-sdk's OtariProvider to use AsyncOtariClient instead of
+    OtariClient. Bug in any-llm-sdk <=1.17.0: _init_client creates the sync
+    OtariClient but all _acompletion / _aembedding / etc. methods await it,
+    raising "object ChatCompletion can't be used in 'await' expression".
     """
-    if gateway_mode() != _OTARI_PROVIDER:
-        return {"provider": provider, "model": model}
+    try:
+        from any_llm.providers.otari.otari import OtariProvider
+        from otari import AsyncOtariClient
 
-    api_base = _otari_api_base()
-    if not api_base:
-        # Otari requested but not configured — degrade gracefully to direct.
-        return {"provider": provider, "model": model}
+        _original_init_client = OtariProvider._init_client
 
-    kwargs: dict[str, str] = {
-        "provider": _OTARI_PROVIDER,
+        def _patched_init_client(
+            self: Any, api_key: Any = None, api_base: Any = None, **kwargs: Any
+        ) -> None:
+            _original_init_client(self, api_key=api_key, api_base=api_base, **kwargs)
+            # Replace the sync OtariClient with the async one so that
+            # `await self.otari_client.completion(...)` works correctly.
+            orig = self.otari_client
+            self.otari_client = AsyncOtariClient(
+                api_base=orig._base_url.removesuffix("/v1")
+                if orig._base_url.endswith("/v1")
+                else orig._base_url,
+                api_key=getattr(orig, "_api_key", None),
+                platform_token=getattr(orig, "_platform_token", None),
+                default_headers=getattr(orig, "_default_headers", None),
+            )
+            # Re-bind the openai async client attribute used by base class helpers
+            self.client = self.otari_client.openai
+
+        OtariProvider._init_client = _patched_init_client  # type: ignore[method-assign]
+    except Exception:
+        pass  # If patch fails, the error surfaces at call time with the original message
+
+
+def resolve_completion_kwargs(provider: str, model: str) -> dict[str, Any]:
+    """
+    Return extra kwargs to merge into any_llm.completion() calls.
+
+    Direct mode (LLM_GATEWAY not set):
+        Returns {} — provider and model are passed through unchanged.
+
+    Otari mode (LLM_GATEWAY=otari):
+        Returns {"provider": "otari", "model": "<provider>:<model>"} so the
+        any-llm-sdk OtariProvider routes the call through the Otari gateway.
+        The gateway uses OTARI_AI_TOKEN for auth (auto-read by the otari SDK).
+
+    Fallback: if OTARI_AI_TOKEN is unset, emits a RuntimeWarning and returns {}
+    so a misconfigured gateway never silently breaks a run.
+    """
+    gateway = os.getenv("LLM_GATEWAY", "").strip().lower()
+    if gateway != "otari":
+        return {}
+
+    token = (
+        os.getenv("OTARI_AI_TOKEN")
+        or os.getenv("OTARI_PLATFORM_TOKEN")
+        or os.getenv("GATEWAY_PLATFORM_TOKEN")
+    )
+
+    if not token:
+        warnings.warn(
+            "[llm_gateway] LLM_GATEWAY=otari but OTARI_AI_TOKEN is not set. "
+            "Go to your Otari dashboard → API Keys to generate one. "
+            "Falling back to direct provider calls.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return {}
+
+    # Apply the async-client patch the first time Otari mode is activated.
+    _patch_otari_provider()
+
+    # any-llm-sdk's OtariProvider requires api_base explicitly — it does not inherit
+    # the otari SDK's built-in default. Fall back to the hosted gateway URL.
+    api_base = (
+        os.getenv("OTARI_API_BASE") or os.getenv("GATEWAY_API_BASE") or "https://api.otari.ai"
+    )
+
+    return {
+        "provider": "otari",
         "model": f"{provider}:{model}",
         "api_base": api_base,
     }
-    api_key = _otari_api_key()
-    if api_key:
-        kwargs["api_key"] = api_key
-    return kwargs

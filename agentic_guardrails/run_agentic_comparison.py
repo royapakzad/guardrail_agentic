@@ -54,6 +54,9 @@ import sys
 import time
 from typing import Any, NamedTuple
 
+# PR #12/#13: the PydanticSerializationUnexpectedValue filter for any-guardrail 0.2.2
+# has been removed. AnyLlmAdapter no longer calls guardrail.validate() at all, so the
+# warning can no longer fire.
 from dotenv import load_dotenv
 
 # Make sure imports resolve correctly whether run as a script or as a module.
@@ -170,7 +173,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--provider",
         default="openai",
-        choices=["openai", "anthropic", "gemini", "mistral", "cohere", "deepseek", "cerebras", "ollama"],
+        choices=[
+            "openai",
+            "anthropic",
+            "gemini",
+            "mistral",
+            "cohere",
+            "deepseek",
+            "cerebras",
+            "ollama",
+        ],
         help="LLM provider for the assistant model (default: openai).",
     )
     p.add_argument(
@@ -235,7 +247,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--guardrail-provider",
         default=None,
-        choices=["openai", "anthropic", "gemini", "mistral", "cohere", "deepseek", "cerebras", "ollama"],
+        choices=[
+            "openai",
+            "anthropic",
+            "gemini",
+            "mistral",
+            "cohere",
+            "deepseek",
+            "cerebras",
+            "ollama",
+        ],
         help=(
             "Single-judge mode: provider for the guardrail/judge model "
             "(defaults to --provider). Ignored when --guardrail-judges is set."
@@ -275,19 +296,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
-        "--tool-group",
-        default="default",
-        help=(
-            "Which set of agentic tools the judge may call (default: 'default' = "
-            "search_web, fetch_url, check_url_validity, check_acronym). Domain tool "
-            "groups (humanitarian / financial / content_moderation) are added in later PRs."
-        ),
-    )
-    p.add_argument(
         "--max-tool-calls",
         type=int,
         default=5,
         help="Maximum tool invocations per agentic evaluation (default: 5).",
+    )
+    p.add_argument(
+        "--tool-group",
+        default="default",
+        help=(
+            "Tool group for the agentic guardrail (default: default). "
+            "Must match a key in tools.TOOL_GROUPS. Typos fail fast at startup."
+        ),
     )
     p.add_argument(
         "--verbose",
@@ -310,7 +330,7 @@ def process_row(
     rubric: str,
     max_tool_calls: int,
     web_search_tool: str = "duckduckgo",
-    tool_group: str = "default",
+    tool_group: str = "default",  # PR #15
     verbose: bool = False,
     log_dir: str | None = None,
 ) -> dict[str, Any]:
@@ -373,10 +393,11 @@ def process_row(
             "model": assistant_model,
             "assistant_system_prompt": assistant_system_prompt,
             "assistant_response": assistant_response,
-            "guardrail_backend": guardrail.backend_name,
+            "guardrail_backend": guardrail.backend_name,  # PR #11: canonical name
             "guardrail_judges": [j.model_id for j in judges],
             "max_tool_calls_allowed": max_tool_calls,
             "web_search_tool": web_search_tool,
+            "tool_group": tool_group,  # PR #15
         }
     )
 
@@ -444,7 +465,9 @@ def process_row(
                         total_tokens=na_total_tokens,
                     )
                 if verbose:
-                    print(f"score={gr.score}  valid={gr.valid}  tokens={na_total_tokens:,}  time={_na_elapsed:.2f}s")
+                    print(
+                        f"score={gr.score}  valid={gr.valid}  tokens={na_total_tokens:,}  time={_na_elapsed:.2f}s"
+                    )
             except Exception as e:
                 _na_elapsed = round(time.perf_counter() - _na_start, 3)
                 out[f"{base}_nonagentic_valid"] = None
@@ -489,11 +512,11 @@ def process_row(
                     user_message=scenario,
                     assistant_response=assistant_response,
                     max_tool_calls=max_tool_calls,
+                    tool_group=tool_group,  # PR #15
                     verbose=verbose,
                     logger=logger,
                     nonagentic_hints=na_hints,
                     scenario_language=language or "en",
-                    tool_group=tool_group,
                     policy_label=f"{policy_label}[{judge.model_id}]",
                 )
             except Exception as e:
@@ -594,16 +617,16 @@ def main() -> None:
     args = parser.parse_args()
 
     # ---- Configure web search backend for agentic tools --------------------
-    # Must be done before any tool calls; all workers share the module-level state.
     import tools as _tools_mod
 
     _tools_mod.set_search_backend(args.web_search_tool)
-
-    # Validate the tool group up front so a typo fails fast (before any LLM calls).
-    if args.tool_group not in _tools_mod.TOOL_GROUPS:
-        valid = ", ".join(sorted(_tools_mod.TOOL_GROUPS))
-        parser.error(f"--tool-group must be one of: {valid}. Got: {args.tool_group!r}")
     print(f"Web search backend: {args.web_search_tool.upper()}")
+
+    # ---- Validate tool group (PR #15) --------------------------------------
+    if args.tool_group not in _tools_mod.TOOL_GROUPS:
+        valid_groups = ", ".join(sorted(_tools_mod.TOOL_GROUPS))
+        parser.error(f"Unknown --tool-group {args.tool_group!r}. Valid groups: {valid_groups}")
+    print(f"Tool group: {args.tool_group}")
 
     # ---- Load shared text configs -------------------------------------------
     # These files are read once and passed to every row's evaluation.
@@ -617,12 +640,19 @@ def main() -> None:
     glider_rubric = ""
     if args.guardrail == "glider":
         if not args.glider_pass_criteria_file:
-            parser.error("When using --guardrail glider, you must provide --glider-pass-criteria-file.")
+            parser.error(
+                "When using --guardrail glider, you must provide --glider-pass-criteria-file."
+            )
         glider_pass_criteria = load_text_file(args.glider_pass_criteria_file, default="")
         if not glider_pass_criteria:
-            parser.error(f"Glider pass criteria file is empty or missing: {args.glider_pass_criteria_file}")
+            parser.error(
+                f"Glider pass criteria file is empty or missing: {args.glider_pass_criteria_file}"
+            )
         # Fall back to the shared rubric if no Glider-specific rubric is given.
-        glider_rubric = load_text_file(args.glider_rubric_file, default="") if args.glider_rubric_file else rubric
+        if args.glider_rubric_file:
+            glider_rubric = load_text_file(args.glider_rubric_file, default="")
+        else:
+            glider_rubric = rubric
         if not glider_rubric:
             parser.error(
                 "When using --guardrail glider, either --glider-rubric-file or "
@@ -633,7 +663,9 @@ def main() -> None:
     if args.guardrail == "flowjudge" and args.flowjudge_criteria_file:
         flowjudge_criteria = load_text_file(args.flowjudge_criteria_file, default="")
         if not flowjudge_criteria:
-            parser.error(f"FlowJudge criteria file is empty or missing: {args.flowjudge_criteria_file}")
+            parser.error(
+                f"FlowJudge criteria file is empty or missing: {args.flowjudge_criteria_file}"
+            )
 
     # ---- Load policy files -------------------------------------------------
     # Each policy file becomes its own set of output columns (non-agentic +
@@ -743,7 +775,7 @@ def main() -> None:
                 rubric=rubric,
                 max_tool_calls=args.max_tool_calls,
                 web_search_tool=args.web_search_tool,
-                tool_group=args.tool_group,
+                tool_group=args.tool_group,  # PR #15
                 verbose=args.verbose,
                 log_dir=log_dir,
             )
