@@ -945,3 +945,179 @@ TOOL_GROUPS["humanitarian"] = [
     "health_advisory",
     "aid_org_verify",
 ]
+
+
+# ══ Financial domain tools ═════════════════════════════════════════════════════
+# Both sources are free and key-free: the SEC EDGAR company register (a real
+# SEC-registered issuer?) and the OFAC Specially Designated Nationals list (is
+# this party sanctioned?). The large lists are fetched once and cached in-process.
+
+_SEC_TICKERS_CACHE: list[dict] | None = None
+_OFAC_SDN_CACHE: list[dict] | None = None
+
+
+def _http_text(url: str, *, timeout: int = 30) -> str:
+    """GET a URL and return the raw text body, raising ToolError on failure."""
+    try:
+        import requests
+    except ImportError as exc:
+        raise ToolError(f"Missing dependency: {exc}. Run: pip install requests") from exc
+    try:
+        resp = requests.get(
+            url, timeout=timeout, headers={"User-Agent": "guardrail-agentic research (+mozilla.ai)"}
+        )
+        resp.raise_for_status()
+        return resp.text
+    except Exception as exc:
+        raise ToolError(f"Request to {url} failed: {exc}") from exc
+
+
+def _load_sec_tickers() -> list[dict]:
+    global _SEC_TICKERS_CACHE
+    if _SEC_TICKERS_CACHE is None:
+        data = _http_json("https://www.sec.gov/files/company_tickers.json")
+        _SEC_TICKERS_CACHE = list(data.values()) if isinstance(data, dict) else []
+    return _SEC_TICKERS_CACHE
+
+
+def _load_ofac_sdn() -> list[dict]:
+    global _OFAC_SDN_CACHE
+    if _OFAC_SDN_CACHE is None:
+        import csv
+        import io
+
+        text = _http_text("https://www.treasury.gov/ofac/downloads/sdn.csv")
+        rows: list[dict] = []
+        for rec in csv.reader(io.StringIO(text)):
+            if len(rec) >= 2 and rec[1].strip():
+                rows.append(
+                    {
+                        "name": rec[1].strip(),
+                        "type": (rec[2].strip() if len(rec) > 2 else "").replace("-0-", "").strip(),
+                        "program": (rec[3].strip() if len(rec) > 3 else "")
+                        .replace("-0-", "")
+                        .strip(),
+                    }
+                )
+        _OFAC_SDN_CACHE = rows
+    return _OFAC_SDN_CACHE
+
+
+def entity_registration(name_or_ticker: str, limit: int = 5) -> dict:
+    """Check whether a company/ticker is a real SEC-registered issuer (EDGAR register)."""
+    query = name_or_ticker.strip()
+    if not query:
+        return {"query": name_or_ticker, "registered": None, "matches": [], "note": "Empty query."}
+    ql = query.lower()
+    tickers = _load_sec_tickers()
+    exact = [r for r in tickers if str(r.get("ticker", "")).lower() == ql]
+    title_hits = [r for r in tickers if ql in str(r.get("title", "")).lower()]
+    seen: set = set()
+    matches: list[dict] = []
+    for r in exact + title_hits:
+        cik = r.get("cik_str")
+        if cik in seen:
+            continue
+        seen.add(cik)
+        matches.append({"name": r.get("title", ""), "ticker": r.get("ticker", ""), "cik": cik})
+        if len(matches) >= limit:
+            break
+    registered = len(matches) > 0
+    note = (
+        "Found in the SEC EDGAR company register (a real SEC-registered issuer)."
+        if registered
+        else "No match in the SEC EDGAR register — not a US-listed SEC registrant (may still be "
+        "a private or foreign entity; verify independently before trusting)."
+    )
+    return {"query": name_or_ticker, "registered": registered, "matches": matches, "note": note}
+
+
+def sanctions_screen(name: str, limit: int = 8) -> dict:
+    """Screen a person/entity name against the OFAC Specially Designated Nationals (SDN) list."""
+    q = name.strip().lower()
+    if len(q) < 3:
+        return {
+            "query": name,
+            "sanctioned": None,
+            "matches": [],
+            "note": "Query too short to screen reliably.",
+        }
+    sdn = _load_ofac_sdn()
+    matches: list[dict] = []
+    for row in sdn:
+        rn = row["name"].lower()
+        if q in rn or rn in q:
+            matches.append(
+                {"name": row["name"], "type": row["type"] or "entity", "program": row["program"]}
+            )
+            if len(matches) >= limit:
+                break
+    sanctioned = len(matches) > 0
+    note = (
+        "POTENTIAL OFAC SDN sanctions match — treat as a SERIOUS red flag; dealings with "
+        "sanctioned parties are illegal. Confirm it is the same party (names can collide)."
+        if sanctioned
+        else "No match on the OFAC SDN (Specially Designated Nationals) list."
+    )
+    return {"query": name, "sanctioned": sanctioned, "matches": matches, "note": note}
+
+
+# ── Financial handlers + schemas (main's REGISTRY style) ──────────────────────
+
+
+def _entity_registration_handler(args: dict) -> dict:
+    return entity_registration(args.get("name_or_ticker", ""))
+
+
+def _sanctions_screen_handler(args: dict) -> dict:
+    return sanctions_screen(args.get("name", ""))
+
+
+_ENTITY_REGISTRATION_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "entity_registration",
+        "description": (
+            "Verify whether a company or stock ticker is a real, SEC-registered issuer using the SEC "
+            "EDGAR company register. Use when the assistant names a company, fund, or ticker — an "
+            "unregistered 'broker' or a fabricated ticker is a major fraud red flag."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name_or_ticker": {
+                    "type": "string",
+                    "description": "Company name or ticker, e.g. 'NVDA' or 'Apple Inc'.",
+                }
+            },
+            "required": ["name_or_ticker"],
+        },
+    },
+}
+
+_SANCTIONS_SCREEN_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "sanctions_screen",
+        "description": (
+            "Screen a named person or entity against the US OFAC Specially Designated Nationals (SDN) "
+            "sanctions list. Use when the assistant names a counterparty, bank, or individual in a "
+            "financial context — a sanctions match means dealing with them is illegal."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Person or entity name to screen, e.g. 'Banco Nacional de Cuba'.",
+                }
+            },
+            "required": ["name"],
+        },
+    },
+}
+
+_register(_ENTITY_REGISTRATION_SCHEMA, _entity_registration_handler)
+_register(_SANCTIONS_SCREEN_SCHEMA, _sanctions_screen_handler)
+
+TOOL_GROUPS["financial"] = ["search_web", "entity_registration", "sanctions_screen"]
