@@ -48,6 +48,13 @@ dev = [
     "pre-commit>=3.8.0",
     "guardrails-multi-search[agentic]",
 ]
+# Install for the content-moderation tool group (open-weight safety classifiers,
+# downloaded on first use):
+#   uv sync --extra content
+content = [
+    "any-guardrail[llamafile]==0.5.1",
+    "detoxify>=0.5.0",
+]
 
 [build-system]
 requires = ["hatchling"]
