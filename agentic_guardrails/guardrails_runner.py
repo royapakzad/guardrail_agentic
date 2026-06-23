@@ -33,12 +33,13 @@ Exports:
     run_guardrail_for_policy()
     SHARED_SEVERITY_ANCHORS — shared by agentic_runner.py
 """
+
 from __future__ import annotations
 
 import json
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from any_guardrail import AnyGuardrail, GuardrailName, GuardrailOutput
 
@@ -52,8 +53,8 @@ class NonAgenticJudgment:
     Backward-compatible: valid/score/explanation mirror the old GuardrailOutput fields.
     """
 
-    valid: Optional[bool]
-    score: Optional[float]
+    valid: bool | None
+    score: float | None
     explanation: str
     overall_verdict: str = ""
     confidence: str = ""
@@ -139,7 +140,7 @@ _GENERATIVE_JUDGE_SYSTEM_PROMPT = (
 )
 
 
-def _rederive_score_from_explanation(explanation: str) -> Optional[float]:
+def _rederive_score_from_explanation(explanation: str) -> float | None:
     """
     Re-derive the score from the DEDUCTION SUMMARY arithmetic in the explanation.
 
@@ -162,7 +163,7 @@ def _rederive_score_from_explanation(explanation: str) -> Optional[float]:
         return None
 
 
-def _extract_first_json_object(text: str) -> Optional[dict]:
+def _extract_first_json_object(text: str) -> dict | None:
     """
     Extract the first parseable JSON object from free-form text.
 
@@ -196,7 +197,7 @@ def _extract_first_json_object(text: str) -> Optional[dict]:
     return None
 
 
-def _build_nonagentic_hints(judgment: "NonAgenticJudgment") -> str:
+def _build_nonagentic_hints(judgment: NonAgenticJudgment) -> str:
     """
     Format non-agentic categorical verdicts as a hint string for the agentic judge.
 
@@ -246,7 +247,6 @@ def _run_generative_judge(
         eval_text:   Assembled evaluation prompt (policy + rubric + conversation).
     """
     from any_llm import completion as _llm_completion
-
     from llm_gateway import resolve_completion_kwargs
 
     if ":" in model_id:
@@ -271,12 +271,13 @@ def _run_generative_judge(
     call_kwargs.update(gateway_overrides)
 
     resp = _llm_completion(**call_kwargs)
-    text = resp.choices[0].message.content or ""
+    # Non-streaming call always returns a ChatCompletion (not a chunk iterator).
+    text = resp.choices[0].message.content or ""  # type: ignore[union-attr]
     data = _extract_first_json_object(text)
 
     if data and "score" in data:
         score_raw = data.get("score")
-        score: Optional[float] = float(score_raw) if score_raw is not None else None
+        score: float | None = float(score_raw) if score_raw is not None else None
         explanation: str = str(data.get("explanation", "")).strip()
 
         if score is not None and explanation:
@@ -284,7 +285,7 @@ def _run_generative_judge(
             if derived is not None and abs(derived - score) > 0.01:
                 score = derived
 
-        valid: Optional[bool] = (
+        valid: bool | None = (
             (float(score) > NONAGENTIC_VALID_THRESHOLD) if score is not None else None
         )
 
@@ -342,7 +343,7 @@ class GuardrailAdapter(Protocol):
         policy_text: str,
         *,
         assistant_response: str = "",
-        model_id: Optional[str] = None,
+        model_id: str | None = None,
     ) -> NonAgenticJudgment: ...
 
 
@@ -362,12 +363,10 @@ class AnyLlmAdapter:
         policy_text: str,
         *,
         assistant_response: str = "",
-        model_id: Optional[str] = None,
+        model_id: str | None = None,
     ) -> NonAgenticJudgment:
         if not model_id:
-            raise ValueError(
-                "AnyLlmAdapter.evaluate() requires model_id ('provider:model')."
-            )
+            raise ValueError("AnyLlmAdapter.evaluate() requires model_id ('provider:model').")
         return _run_generative_judge(
             model_id=model_id,
             policy_text=policy_text,
@@ -389,7 +388,7 @@ class FlowJudgeAdapter:
         policy_text: str,
         *,
         assistant_response: str = "",
-        model_id: Optional[str] = None,
+        model_id: str | None = None,
     ) -> NonAgenticJudgment:
         raw: GuardrailOutput = self._guardrail.validate(
             inputs=[{"query": eval_text}],
@@ -397,9 +396,7 @@ class FlowJudgeAdapter:
         )
         score = float(raw.score) if raw.score is not None else None
         valid = (score > NONAGENTIC_VALID_THRESHOLD) if score is not None else None
-        return NonAgenticJudgment(
-            valid=valid, score=score, explanation=str(raw.explanation or "")
-        )
+        return NonAgenticJudgment(valid=valid, score=score, explanation=str(raw.explanation or ""))
 
 
 class GliderAdapter:
@@ -416,14 +413,12 @@ class GliderAdapter:
         policy_text: str,
         *,
         assistant_response: str = "",
-        model_id: Optional[str] = None,
+        model_id: str | None = None,
     ) -> NonAgenticJudgment:
         raw: GuardrailOutput = self._guardrail.validate(input_text=eval_text)
         score = float(raw.score) if raw.score is not None else None
         valid = (score > NONAGENTIC_VALID_THRESHOLD) if score is not None else None
-        return NonAgenticJudgment(
-            valid=valid, score=score, explanation=str(raw.explanation or "")
-        )
+        return NonAgenticJudgment(valid=valid, score=score, explanation=str(raw.explanation or ""))
 
 
 # ── Guardrail creation ────────────────────────────────────────────────────────
@@ -435,21 +430,21 @@ VALID_GUARDRAILS = {
 }
 
 
-def load_text_file(path: Optional[str], *, default: str = "") -> str:
+def load_text_file(path: str | None, *, default: str = "") -> str:
     """Load a UTF-8 text file if a path is given; otherwise return default."""
     if not path:
         return default
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read().strip()
 
 
 def create_guardrail(
     name_str: str,
     *,
-    glider_pass_criteria: Optional[str] = None,
-    glider_rubric: Optional[str] = None,
+    glider_pass_criteria: str | None = None,
+    glider_rubric: str | None = None,
     flowjudge_metric_name: str = "policy_compliance",
-    flowjudge_criteria: Optional[str] = None,
+    flowjudge_criteria: str | None = None,
 ) -> GuardrailAdapter:
     """
     Create a guardrail adapter from a short name: flowjudge | glider | anyllm.
@@ -530,7 +525,7 @@ def build_guardrail_input_text(
       4. Full conversation: system prompt + user message + response.
       5. Evaluation instructions.
     """
-    parts: List[str] = []
+    parts: list[str] = []
     parts.append(
         "You are an evaluation model. Your job is NOT to answer the "
         "user's question, but to JUDGE whether the assistant's response "
@@ -575,7 +570,7 @@ def run_guardrail_for_policy(
     system_prompt: str,
     user_message: str,
     assistant_response: str,
-    model_id: Optional[str] = None,
+    model_id: str | None = None,
 ) -> NonAgenticJudgment:
     """
     Run the chosen guardrail adapter for a single (response, policy) pair.

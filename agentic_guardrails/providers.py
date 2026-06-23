@@ -21,10 +21,10 @@ Install:
   pip install 'any-llm-sdk[openai,anthropic,gemini,mistral]'
   pip install 'any-llm-sdk[all]'   # all providers
 """
+
 from __future__ import annotations
 
 from any_llm import completion as _completion
-
 from llm_gateway import resolve_completion_kwargs  # PR #14
 
 SUPPORTED_PROVIDERS = (
@@ -75,4 +75,5 @@ def call_llm(
         kwargs["temperature"] = temperature
 
     resp = _completion(**kwargs)
-    return resp.choices[0].message.content or ""
+    # Non-streaming call always returns a ChatCompletion (not a chunk iterator).
+    return resp.choices[0].message.content or ""  # type: ignore[union-attr]

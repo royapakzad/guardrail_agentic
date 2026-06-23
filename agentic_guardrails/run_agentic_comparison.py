@@ -43,6 +43,7 @@ Usage example
   # With SearXNG (requires Docker + running SearXNG instance):
     --web-search-tool searxng
 """
+
 from __future__ import annotations
 
 import argparse
@@ -51,37 +52,36 @@ import os
 import re
 import sys
 import time
-import warnings
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, NamedTuple
 
 # PR #12/#13: the PydanticSerializationUnexpectedValue filter for any-guardrail 0.2.2
 # has been removed. AnyLlmAdapter no longer calls guardrail.validate() at all, so the
 # warning can no longer fire.
-
 from dotenv import load_dotenv
 
 # Make sure imports resolve correctly whether run as a script or as a module.
 sys.path.insert(0, os.path.dirname(__file__))
 
-from providers import call_llm
+from agentic_runner import AgenticJudgment, run_agentic_guardrail
+from comparison import compare_judgments
 from guardrails_runner import (
+    _build_nonagentic_hints,
+    build_guardrail_input_text,
     create_guardrail,
     load_text_file,
-    build_guardrail_input_text,
     run_guardrail_for_policy,
-    _build_nonagentic_hints,
 )
-from agentic_runner import run_agentic_guardrail, AgenticJudgment
-from comparison import compare_judgments
 from output_writer import write_outputs
+from providers import call_llm
 from scenario_logger import ScenarioLogger
 
 
 class JudgeSpec(NamedTuple):
     """A single guardrail judge: provider + model + a safe label for column names."""
-    provider: str   # e.g. "openai", "anthropic", "gemini"
-    model: str      # e.g. "gpt-5-nano", "claude-sonnet-4-6", "gemini-2.5-flash"
-    label: str      # sanitized for CSV column names, e.g. "gpt_5_nano"
+
+    provider: str  # e.g. "openai", "anthropic", "gemini"
+    model: str  # e.g. "gpt-5-nano", "claude-sonnet-4-6", "gemini-2.5-flash"
+    label: str  # sanitized for CSV column names, e.g. "gpt_5_nano"
 
     @property
     def model_id(self) -> str:
@@ -127,6 +127,7 @@ def _count_tokens(text: str, model: str = "gpt-4o") -> int:
     """
     try:
         import tiktoken
+
         try:
             enc = tiktoken.encoding_for_model(model)
         except KeyError:
@@ -172,7 +173,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--provider",
         default="openai",
-        choices=["openai", "anthropic", "gemini", "mistral", "cohere", "deepseek", "cerebras", "ollama"],
+        choices=[
+            "openai",
+            "anthropic",
+            "gemini",
+            "mistral",
+            "cohere",
+            "deepseek",
+            "cerebras",
+            "ollama",
+        ],
         help="LLM provider for the assistant model (default: openai).",
     )
     p.add_argument(
@@ -237,7 +247,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--guardrail-provider",
         default=None,
-        choices=["openai", "anthropic", "gemini", "mistral", "cohere", "deepseek", "cerebras", "ollama"],
+        choices=[
+            "openai",
+            "anthropic",
+            "gemini",
+            "mistral",
+            "cohere",
+            "deepseek",
+            "cerebras",
+            "ollama",
+        ],
         help=(
             "Single-judge mode: provider for the guardrail/judge model "
             "(defaults to --provider). Ignored when --guardrail-judges is set."
@@ -300,21 +319,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def process_row(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     *,
     assistant_provider: str,
     assistant_model: str,
     assistant_system_prompt: str,
     guardrail,
-    judges: List[JudgeSpec],
-    policies: List[Tuple[str, str]],
+    judges: list[JudgeSpec],
+    policies: list[tuple[str, str]],
     rubric: str,
     max_tool_calls: int,
     web_search_tool: str = "duckduckgo",
     tool_group: str = "default",  # PR #15
     verbose: bool = False,
-    log_dir: Optional[str] = None,
-) -> Dict[str, Any]:
+    log_dir: str | None = None,
+) -> dict[str, Any]:
     """
     Full pipeline for one CSV row.
 
@@ -341,7 +360,7 @@ def process_row(
     language = row.get("language", "")
 
     # Create a per-scenario logger if a log directory was specified.
-    logger: Optional[ScenarioLogger] = None
+    logger: ScenarioLogger | None = None
     if log_dir and log_dir.lower() != "none":
         logger = ScenarioLogger(
             log_dir=log_dir,
@@ -367,7 +386,7 @@ def process_row(
             assistant_response=assistant_response,
         )
 
-    out: Dict[str, Any] = dict(row)
+    out: dict[str, Any] = dict(row)
     out.update(
         {
             "provider": assistant_provider,
@@ -405,7 +424,7 @@ def process_row(
 
             # 2a. Non-agentic path
             if verbose:
-                print(f"        non-agentic eval ...", end=" ", flush=True)
+                print("        non-agentic eval ...", end=" ", flush=True)
             na_prompt_tokens = _count_tokens(nonagentic_eval_text, model=judge.model)
             _na_start = time.perf_counter()
             try:
@@ -446,7 +465,9 @@ def process_row(
                         total_tokens=na_total_tokens,
                     )
                 if verbose:
-                    print(f"score={gr.score}  valid={gr.valid}  tokens={na_total_tokens:,}  time={_na_elapsed:.2f}s")
+                    print(
+                        f"score={gr.score}  valid={gr.valid}  tokens={na_total_tokens:,}  time={_na_elapsed:.2f}s"
+                    )
             except Exception as e:
                 _na_elapsed = round(time.perf_counter() - _na_start, 3)
                 out[f"{base}_nonagentic_valid"] = None
@@ -559,10 +580,10 @@ def process_row(
 
 
 def _extract_judge_rows(
-    rows: List[Dict[str, Any]],
+    rows: list[dict[str, Any]],
     judge: JudgeSpec,
     base_keys: set,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Extract per-judge rows from the mega rows dict.
 
@@ -576,7 +597,7 @@ def _extract_judge_rows(
     marker = f"_{judge.label}_"
     result = []
     for row in rows:
-        out: Dict[str, Any] = {}
+        out: dict[str, Any] = {}
         for key, val in row.items():
             if key in base_keys:
                 out[key] = val
@@ -597,22 +618,19 @@ def main() -> None:
 
     # ---- Configure web search backend for agentic tools --------------------
     import tools as _tools_mod
+
     _tools_mod.set_search_backend(args.web_search_tool)
     print(f"Web search backend: {args.web_search_tool.upper()}")
 
     # ---- Validate tool group (PR #15) --------------------------------------
     if args.tool_group not in _tools_mod.TOOL_GROUPS:
         valid_groups = ", ".join(sorted(_tools_mod.TOOL_GROUPS))
-        parser.error(
-            f"Unknown --tool-group {args.tool_group!r}. Valid groups: {valid_groups}"
-        )
+        parser.error(f"Unknown --tool-group {args.tool_group!r}. Valid groups: {valid_groups}")
     print(f"Tool group: {args.tool_group}")
 
     # ---- Load shared text configs -------------------------------------------
     # These files are read once and passed to every row's evaluation.
-    assistant_system_prompt = load_text_file(
-        args.assistant_system_prompt_file, default=""
-    )
+    assistant_system_prompt = load_text_file(args.assistant_system_prompt_file, default="")
     rubric = load_text_file(args.rubric_file, default="")
 
     # ---- Backend-specific setup --------------------------------------------
@@ -641,7 +659,7 @@ def main() -> None:
                 "--rubric-file must point to a non-empty file."
             )
 
-    flowjudge_criteria: Optional[str] = None
+    flowjudge_criteria: str | None = None
     if args.guardrail == "flowjudge" and args.flowjudge_criteria_file:
         flowjudge_criteria = load_text_file(args.flowjudge_criteria_file, default="")
         if not flowjudge_criteria:
@@ -652,7 +670,7 @@ def main() -> None:
     # ---- Load policy files -------------------------------------------------
     # Each policy file becomes its own set of output columns (non-agentic +
     # agentic + comparison), labelled by the filename without extension.
-    policies: List[Tuple[str, str]] = []
+    policies: list[tuple[str, str]] = []
     for policy_path in args.policy_files:
         text = load_text_file(policy_path, default="")
         if not text:
@@ -668,7 +686,7 @@ def main() -> None:
     # --guardrail-provider / --guardrail-model flags.
     if args.guardrail_judges:
         try:
-            judges: List[JudgeSpec] = [_parse_judge(s) for s in args.guardrail_judges]
+            judges: list[JudgeSpec] = [_parse_judge(s) for s in args.guardrail_judges]
         except argparse.ArgumentTypeError as e:
             parser.error(str(e))
     else:
@@ -693,7 +711,7 @@ def main() -> None:
     )
 
     # ---- Read input CSV ----------------------------------------------------
-    with open(args.input, "r", encoding="utf-8") as f:
+    with open(args.input, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows_in = list(reader)
 
@@ -702,7 +720,7 @@ def main() -> None:
 
     # ---- Resolve log directory ---------------------------------------------
     # Default to <output_prefix>_logs/ if not explicitly set.
-    log_dir: Optional[str] = args.log_dir
+    log_dir: str | None = args.log_dir
     if log_dir is None:
         log_dir = args.output_prefix + "_logs"
     elif log_dir.lower() == "none":
@@ -716,8 +734,14 @@ def main() -> None:
     # every iteration without waiting for all rows to complete.
     base_keys: set = set(rows_in[0].keys()) if rows_in else set()
     base_keys |= {
-        "provider", "model", "assistant_system_prompt", "assistant_response",
-        "guardrail_backend", "max_tool_calls_allowed", "web_search_tool", "error",
+        "provider",
+        "model",
+        "assistant_system_prompt",
+        "assistant_response",
+        "guardrail_backend",
+        "max_tool_calls_allowed",
+        "web_search_tool",
+        "error",
     }
 
     def _flush(rows: list, *, label: str = "") -> None:
@@ -783,7 +807,7 @@ def main() -> None:
     # Mega file: all judges combined in one file with judge-namespaced columns.
     # Useful for cross-judge analysis and comparison scripts.
     csv_path, json_path = write_outputs(rows_out, f"{args.output_prefix}_all")
-    print(f"\nMega file (all judges combined):")
+    print("\nMega file (all judges combined):")
     print(f"  CSV  → {csv_path}")
     print(f"  JSON → {json_path}")
 

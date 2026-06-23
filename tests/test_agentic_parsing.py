@@ -1,8 +1,8 @@
 """Tests for agentic_runner pure-logic helpers (network-free)."""
+
 import json
 
 import pytest
-
 from agentic_runner import (
     _extract_json_candidates,
     _infer_confidence,
@@ -10,7 +10,6 @@ from agentic_runner import (
     _summarize_tool_result,
     parse_judgment_from_text,
 )
-
 
 # ── _extract_json_candidates ──────────────────────────────────────────────────
 
@@ -117,10 +116,7 @@ def test_parse_judgment_falls_back_on_no_json():
 
 def test_parse_judgment_arithmetic_overrides_json_score():
     # JSON score says 0.80 but deduction arithmetic says 0.75 — arithmetic wins
-    text = (
-        '{"score": 0.80, "explanation": '
-        '"Final score: max(0.05, 1.0 − 0.25) = 0.75"}'
-    )
+    text = '{"score": 0.80, "explanation": "Final score: max(0.05, 1.0 − 0.25) = 0.75"}'
     result = parse_judgment_from_text(text)
     assert result["score"] == pytest.approx(0.75)
 
@@ -169,9 +165,7 @@ def test_summarize_check_url_validity_valid():
 
 def test_summarize_check_url_validity_broken():
     result_str = json.dumps({"valid": False, "status_code": 404})
-    summary = _summarize_tool_result(
-        "check_url_validity", {"url": "http://broken.com"}, result_str
-    )
+    summary = _summarize_tool_result("check_url_validity", {"url": "http://broken.com"}, result_str)
     assert "✗ BROKEN" in summary
 
 

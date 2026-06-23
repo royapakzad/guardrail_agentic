@@ -35,14 +35,16 @@ Exports:
   TOOL_GROUPS                — named lists of tool names
   _fetch_main_text(url, max_chars) -> str  (exposed for tests)
 """
+
 from __future__ import annotations
 
 import concurrent.futures
 import importlib
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 MAX_FETCH_CHARS = 4000
 MAX_SEARCH_RESULTS = 5
@@ -72,8 +74,7 @@ def set_search_backend(name: str) -> None:
     name = name.lower().strip()
     if name not in VALID_BACKENDS:
         raise ValueError(
-            f"Unknown search backend {name!r}. "
-            f"Valid choices: {', '.join(sorted(VALID_BACKENDS))}"
+            f"Unknown search backend {name!r}. Valid choices: {', '.join(sorted(VALID_BACKENDS))}"
         )
     _active_backend = name
 
@@ -138,9 +139,7 @@ def _fetch_main_text(url: str, max_chars: int) -> str:
     try:
         import requests
     except ImportError as exc:
-        raise ToolError(
-            f"Missing dependency: {exc}. Run: pip install requests"
-        ) from exc
+        raise ToolError(f"Missing dependency: {exc}. Run: pip install requests") from exc
 
     try:
         resp = requests.get(
@@ -175,9 +174,7 @@ def _fetch_main_text(url: str, max_chars: int) -> str:
     try:
         from bs4 import BeautifulSoup
     except ImportError as exc:
-        raise ToolError(
-            f"Missing dependency: {exc}. Run: pip install beautifulsoup4"
-        ) from exc
+        raise ToolError(f"Missing dependency: {exc}. Run: pip install beautifulsoup4") from exc
 
     try:
         soup = BeautifulSoup(raw_html, "html.parser")
@@ -197,7 +194,12 @@ def _search_searxng(query: str, max_results: int) -> list[dict[str, str]]:
     except ImportError as exc:
         raise ToolError("'requests' is not installed. Run: pip install requests") from exc
     base_url = os.getenv("SEARXNG_BASE_URL", _SEARXNG_DEFAULT_URL).rstrip("/")
-    params = {"q": query, "format": "json", "language": "all", "safesearch": 0}
+    params: dict[str, str | int] = {
+        "q": query,
+        "format": "json",
+        "language": "all",
+        "safesearch": 0,
+    }
     try:
         resp = requests.get(
             f"{base_url}/search",
@@ -237,11 +239,9 @@ def _search_searxng(query: str, max_results: int) -> list[dict[str, str]]:
 
 def _tavily_client():
     try:
-        from tavily import TavilyClient  # type: ignore
+        from tavily import TavilyClient
     except ImportError as exc:
-        raise ToolError(
-            "'tavily-python' is not installed. Run: pip install tavily-python"
-        ) from exc
+        raise ToolError("'tavily-python' is not installed. Run: pip install tavily-python") from exc
     api_key = os.getenv("TAVILY_API_KEY", "")
     if not api_key:
         raise ToolError(
@@ -347,9 +347,7 @@ def check_url_validity(url: str) -> dict:
     try:
         resp = requests.head(url, timeout=15, headers=headers, allow_redirects=True)
         if resp.status_code == 405:
-            resp = requests.get(
-                url, timeout=25, headers=headers, allow_redirects=True, stream=True
-            )
+            resp = requests.get(url, timeout=25, headers=headers, allow_redirects=True, stream=True)
             resp.close()
     except requests.Timeout:
         return {
@@ -668,3 +666,282 @@ def dispatch_tool_call(name: str, arguments_json: str) -> str:
             )
         except ToolError as exc:
             return json.dumps({"error": str(exc)})
+
+
+def _http_json(url: str, *, params: dict | None = None, timeout: int = 20) -> Any:
+    """GET a URL and return parsed JSON, raising ToolError on any failure."""
+    try:
+        import requests
+    except ImportError as exc:
+        raise ToolError(f"Missing dependency: {exc}. Run: pip install requests") from exc
+    try:
+        resp = requests.get(
+            url,
+            params=params,
+            timeout=timeout,
+            headers={"User-Agent": "guardrail-agentic (research; +https://mozilla.ai)"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        raise ToolError(f"Request to {url} failed: {exc}") from exc
+
+
+# ══ Humanitarian domain tools ══════════════════════════════════════════════════
+# Free/no-key: GDACS (disaster alerts) and WHO GHO (health indicators).
+# ReliefWeb's v2 API requires a free, approved appname (request one at
+# https://apidoc.reliefweb.int/ and set RELIEFWEB_APPNAME); without it the two
+# ReliefWeb-backed tools degrade gracefully with a clear note instead of failing.
+
+_RELIEFWEB_NO_APPNAME = (
+    "ReliefWeb is not configured: set RELIEFWEB_APPNAME in your environment "
+    "(request a free appname at https://apidoc.reliefweb.int/). Cannot verify via "
+    "ReliefWeb right now — do not treat this as evidence either way."
+)
+
+
+def reliefweb_situation(query: str, limit: int = 5) -> dict:
+    """Recent UN OCHA ReliefWeb situation reports matching a country/crisis query."""
+    appname = os.getenv("RELIEFWEB_APPNAME", "").strip()
+    if not appname:
+        return {"query": query, "results": [], "note": _RELIEFWEB_NO_APPNAME}
+    data = _http_json(
+        "https://api.reliefweb.int/v2/reports",
+        params={
+            "appname": appname,
+            "query[value]": query,
+            "limit": limit,
+            "fields[include][]": ["title", "url", "source.name", "date.created"],
+            "sort[]": "date.created:desc",
+        },
+    )
+    results = []
+    for d in data.get("data", []):
+        f = d.get("fields", {})
+        src = f.get("source") or []
+        results.append(
+            {
+                "title": f.get("title", ""),
+                "url": f.get("url", ""),
+                "source": src[0].get("name", "") if src else "",
+                "date": (f.get("date") or {}).get("created", ""),
+            }
+        )
+    return {
+        "query": query,
+        "results": results,
+        "note": "" if results else "No matching ReliefWeb situation reports.",
+    }
+
+
+def disaster_alert(query: str = "", limit: int = 8) -> dict:
+    """Current GDACS disaster alerts (earthquake, cyclone, flood, drought, volcano, wildfire)."""
+    data = _http_json("https://www.gdacs.org/gdacsapi/api/events/geteventlist/EVENTS4APP")
+    q = query.lower().strip()
+    alerts = []
+    for ft in data.get("features", []):
+        p = ft.get("properties", {})
+        haystack = " ".join(
+            str(p.get(k, "")) for k in ("country", "name", "eventname", "description", "eventtype")
+        ).lower()
+        if q and q not in haystack:
+            continue
+        url = p.get("url")
+        if isinstance(url, dict):
+            url = url.get("report", "") or url.get("details", "")
+        alerts.append(
+            {
+                "event_type": p.get("eventtype", ""),
+                "name": p.get("eventname") or p.get("name", ""),
+                "alert_level": p.get("alertlevel", ""),
+                "country": p.get("country", ""),
+                "from_date": p.get("fromdate", ""),
+                "url": url or "",
+                "summary": (p.get("description", "") or "")[:200],
+            }
+        )
+    return {
+        "query": query,
+        "alerts": alerts[:limit],
+        "note": "" if alerts else "No active GDACS alert matched.",
+    }
+
+
+def health_advisory(query: str, limit: int = 8) -> dict:
+    """WHO Global Health Observatory indicators matching a health topic (verify health-statistic claims)."""
+    safe = query.replace("'", "''")
+    data = _http_json(
+        "https://ghoapi.azureedge.net/api/Indicator",
+        params={"$filter": f"contains(IndicatorName,'{safe}')"},
+    )
+    indicators = [
+        {"code": v.get("IndicatorCode", ""), "name": v.get("IndicatorName", "")}
+        for v in (data.get("value") or [])[:limit]
+    ]
+    note = (
+        "WHO Global Health Observatory indicators — use to check health-statistic claims."
+        if indicators
+        else "No WHO GHO indicators matched this topic."
+    )
+    return {"query": query, "who_indicators": indicators, "note": note}
+
+
+def aid_org_verify(org_name: str) -> dict:
+    """Check whether an aid/relief organisation appears in ReliefWeb's vetted source list."""
+    appname = os.getenv("RELIEFWEB_APPNAME", "").strip()
+    if not appname:
+        return {
+            "org_name": org_name,
+            "verified": None,
+            "matches": [],
+            "note": _RELIEFWEB_NO_APPNAME,
+        }
+    data = _http_json(
+        "https://api.reliefweb.int/v2/sources",
+        params={
+            "appname": appname,
+            "query[value]": org_name,
+            "limit": 5,
+            "fields[include][]": ["name", "homepage", "type.name"],
+        },
+    )
+    matches = []
+    for d in data.get("data", []):
+        f = d.get("fields", {})
+        matches.append(
+            {
+                "name": f.get("name", ""),
+                "homepage": f.get("homepage", ""),
+                "type": (f.get("type") or {}).get("name", ""),
+            }
+        )
+    needle = org_name.lower()
+    verified = any(needle in m["name"].lower() or m["name"].lower() in needle for m in matches)
+    note = (
+        "Listed in ReliefWeb's vetted humanitarian sources (likely legitimate)."
+        if verified
+        else "No close match in ReliefWeb's vetted sources — verify independently before trusting."
+    )
+    return {"org_name": org_name, "verified": verified, "matches": matches, "note": note}
+
+
+# ── Humanitarian handlers + schemas (registered in main's REGISTRY style) ──────
+
+
+def _reliefweb_situation_handler(args: dict) -> dict:
+    return reliefweb_situation(args.get("query", ""))
+
+
+def _disaster_alert_handler(args: dict) -> dict:
+    return disaster_alert(args.get("query", ""))
+
+
+def _health_advisory_handler(args: dict) -> dict:
+    return health_advisory(args.get("query", ""))
+
+
+def _aid_org_verify_handler(args: dict) -> dict:
+    return aid_org_verify(args.get("org_name", ""))
+
+
+_RELIEFWEB_SITUATION_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "reliefweb_situation",
+        "description": (
+            "Get recent UN OCHA ReliefWeb situation reports for a humanitarian crisis, country, or "
+            "disaster. Use to verify whether the assistant's description of a crisis matches current "
+            "official humanitarian reporting (sources, dates, scale)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Country, crisis, or topic, e.g. 'Sudan displacement'.",
+                }
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+_DISASTER_ALERT_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "disaster_alert",
+        "description": (
+            "Check current GDACS global disaster alerts (earthquakes, cyclones, floods, droughts, "
+            "volcanoes, wildfires). Use to verify whether an active hazard the assistant references is "
+            "real and at what alert level (Green/Orange/Red). Pass a country or hazard to filter."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Country or hazard to filter by, e.g. 'Philippines typhoon'. Empty = all active events.",
+                }
+            },
+            "required": [],
+        },
+    },
+}
+
+_HEALTH_ADVISORY_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "health_advisory",
+        "description": (
+            "Look up WHO Global Health Observatory indicators for a health topic or disease. Use to "
+            "check whether a health statistic or claim in the response corresponds to a real WHO "
+            "indicator (e.g. cholera deaths, measles immunization coverage)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Health topic or disease, e.g. 'cholera', 'measles immunization'.",
+                }
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+_AID_ORG_VERIFY_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "aid_org_verify",
+        "description": (
+            "Verify whether a named aid/relief organisation is a real, vetted humanitarian source "
+            "(listed in ReliefWeb's source registry). Use this when the assistant points the user to a "
+            "specific charity or NGO — to catch crisis-exploiting scam organisations."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "org_name": {
+                    "type": "string",
+                    "description": "The organisation name as cited, e.g. 'Norwegian Refugee Council'.",
+                }
+            },
+            "required": ["org_name"],
+        },
+    },
+}
+
+# Register the humanitarian tools (PR #18)
+_register(_RELIEFWEB_SITUATION_SCHEMA, _reliefweb_situation_handler)
+_register(_DISASTER_ALERT_SCHEMA, _disaster_alert_handler)
+_register(_HEALTH_ADVISORY_SCHEMA, _health_advisory_handler)
+_register(_AID_ORG_VERIFY_SCHEMA, _aid_org_verify_handler)
+
+TOOL_GROUPS["humanitarian"] = [
+    "search_web",
+    "reliefweb_situation",
+    "disaster_alert",
+    "health_advisory",
+    "aid_org_verify",
+]

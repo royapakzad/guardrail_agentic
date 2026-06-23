@@ -1,9 +1,8 @@
 """Tests for three-state URL validity introduced in PR #17."""
+
 from unittest.mock import MagicMock, patch
 
-import pytest
 import requests as req_lib
-
 from tools import check_url_validity
 
 

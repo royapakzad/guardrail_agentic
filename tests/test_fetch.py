@@ -1,8 +1,8 @@
 """Tests for clean-text fetch introduced in PR #16."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from tools import ToolError, _fetch_main_text
 
 
@@ -32,6 +32,7 @@ def test_fetch_main_text_returns_article_content_with_trafilatura():
     with patch("requests.get", return_value=_mock_response(ARTICLE_HTML)):
         try:
             import trafilatura  # noqa: F401
+
             trafilatura_available = True
         except ImportError:
             trafilatura_available = False

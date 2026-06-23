@@ -1,8 +1,6 @@
 """Tests for the tool registry introduced in PR #15."""
-import pytest
 
 from tools import REGISTRY, TOOL_GROUPS, get_tool_schemas
-
 
 EXPECTED_DEFAULT_TOOLS = {"search_web", "fetch_url", "check_url_validity", "check_acronym"}
 

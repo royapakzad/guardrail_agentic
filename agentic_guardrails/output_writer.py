@@ -3,6 +3,7 @@ output_writer.py
 ----------------
 Serialises result rows to CSV and JSON.
 """
+
 from __future__ import annotations
 
 import csv
@@ -50,7 +51,7 @@ def write_outputs(
     # Collect the union of all keys across every row, then sort alphabetically.
     # This handles rows that may have different keys (e.g., an errored row that
     # was written before all output columns could be populated).
-    fieldnames = sorted({k for row in rows for k in row.keys()})
+    fieldnames = sorted({k for row in rows for k in row})
 
     # CSV: convert lists/dicts to JSON strings so the file can be opened
     # in Excel or pandas without parsing errors.

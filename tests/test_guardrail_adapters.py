@@ -1,8 +1,8 @@
 """Tests for GuardrailAdapter protocol and concrete adapters (PR #11)."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from guardrails_runner import (
     AnyLlmAdapter,
     FlowJudgeAdapter,

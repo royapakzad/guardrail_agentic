@@ -1,8 +1,7 @@
 """Tests for guardrails_runner pure-logic helpers (network-free)."""
+
 import pytest
-
 from guardrails_runner import _extract_first_json_object, _rederive_score_from_explanation
-
 
 # ── _extract_first_json_object ────────────────────────────────────────────────
 

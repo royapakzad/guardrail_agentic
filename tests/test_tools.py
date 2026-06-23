@@ -1,11 +1,9 @@
 """Tests for tools.py error handling and check_acronym heuristic (network-free)."""
+
 import json
 from unittest.mock import patch
 
-import pytest
-
 from tools import ToolError, check_acronym, dispatch_tool_call
-
 
 # ── dispatch_tool_call error handling ─────────────────────────────────────────
 

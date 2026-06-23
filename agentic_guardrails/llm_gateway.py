@@ -29,6 +29,7 @@ Exports:
         Emits RuntimeWarning if OTARI_AI_TOKEN is missing so misconfiguration
         is caught early without breaking a run.
 """
+
 from __future__ import annotations
 
 import os
@@ -44,18 +45,22 @@ def _patch_otari_provider() -> None:
     raising "object ChatCompletion can't be used in 'await' expression".
     """
     try:
-        from otari import AsyncOtariClient
         from any_llm.providers.otari.otari import OtariProvider
+        from otari import AsyncOtariClient
 
         _original_init_client = OtariProvider._init_client
 
-        def _patched_init_client(self: Any, api_key: Any = None, api_base: Any = None, **kwargs: Any) -> None:
+        def _patched_init_client(
+            self: Any, api_key: Any = None, api_base: Any = None, **kwargs: Any
+        ) -> None:
             _original_init_client(self, api_key=api_key, api_base=api_base, **kwargs)
             # Replace the sync OtariClient with the async one so that
             # `await self.otari_client.completion(...)` works correctly.
             orig = self.otari_client
             self.otari_client = AsyncOtariClient(
-                api_base=orig._base_url.removesuffix("/v1") if orig._base_url.endswith("/v1") else orig._base_url,
+                api_base=orig._base_url.removesuffix("/v1")
+                if orig._base_url.endswith("/v1")
+                else orig._base_url,
                 api_key=getattr(orig, "_api_key", None),
                 platform_token=getattr(orig, "_platform_token", None),
                 default_headers=getattr(orig, "_default_headers", None),
@@ -109,9 +114,7 @@ def resolve_completion_kwargs(provider: str, model: str) -> dict[str, Any]:
     # any-llm-sdk's OtariProvider requires api_base explicitly — it does not inherit
     # the otari SDK's built-in default. Fall back to the hosted gateway URL.
     api_base = (
-        os.getenv("OTARI_API_BASE")
-        or os.getenv("GATEWAY_API_BASE")
-        or "https://api.otari.ai"
+        os.getenv("OTARI_API_BASE") or os.getenv("GATEWAY_API_BASE") or "https://api.otari.ai"
     )
 
     return {
