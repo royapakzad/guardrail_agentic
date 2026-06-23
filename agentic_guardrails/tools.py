@@ -1121,3 +1121,141 @@ _register(_ENTITY_REGISTRATION_SCHEMA, _entity_registration_handler)
 _register(_SANCTIONS_SCREEN_SCHEMA, _sanctions_screen_handler)
 
 TOOL_GROUPS["financial"] = ["search_web", "entity_registration", "sanctions_screen"]
+
+
+# == Content-moderation domain tools (guardrail-as-a-tool) ====================
+# Open-weight safety classifiers consulted as ADVISORY tools:
+#   classify_safety — IBM Granite Guardian (harm) via any-guardrail llamafile provider.
+#   toxicity_score  — Detoxify (toxicity/threat/insult).
+# NOT non-agentic baselines (FlowJudge/Glider remain baselines); the judge is told to
+# weigh classifier output as evidence, not copy it. Install: uv sync --extra content.
+
+_GRANITE_GUARDIAN: Any = None
+_DETOXIFY: Any = None
+
+
+def _get_granite_guardian() -> Any:
+    global _GRANITE_GUARDIAN
+    if _GRANITE_GUARDIAN is None:
+        try:
+            from any_guardrail.guardrails.granite_guardian import (
+                GraniteGuardian,
+                GraniteGuardianRisk,
+            )
+            from any_guardrail.providers.llamafile import LlamafileProvider
+        except ImportError as exc:
+            raise ToolError(
+                "Granite Guardian (llamafile) is not available. Run: uv sync --extra content"
+            ) from exc
+        _GRANITE_GUARDIAN = GraniteGuardian(
+            criteria=GraniteGuardianRisk.HARM, provider=LlamafileProvider()
+        )
+    return _GRANITE_GUARDIAN
+
+
+def _get_detoxify() -> Any:
+    global _DETOXIFY
+    if _DETOXIFY is None:
+        try:
+            from detoxify import Detoxify
+        except ImportError as exc:
+            raise ToolError("detoxify is not installed. Run: uv sync --extra content") from exc
+        _DETOXIFY = Detoxify("original")
+    return _DETOXIFY
+
+
+def classify_safety(text: str) -> dict:
+    """Consult IBM Granite Guardian (harm risk) as an advisory safety classifier."""
+    if not text.strip():
+        raise ToolError("classify_safety requires non-empty text.")
+    try:
+        out = _get_granite_guardian().validate(text)
+    except ToolError:
+        raise
+    except Exception as exc:
+        raise ToolError(f"Granite Guardian classification failed: {exc}") from exc
+    return {
+        "text_preview": text[:120],
+        "classifier": "ibm-granite-guardian (llamafile)",
+        "risk": "harm",
+        "flagged_unsafe": out.valid is False,
+        "score": out.score,
+        "explanation": out.explanation,
+        "note": "Advisory ML classifier output — weigh it as evidence; do NOT copy it as your verdict.",
+    }
+
+
+def toxicity_score(text: str) -> dict:
+    """Score text for toxicity with Detoxify (advisory; 0–1 per dimension)."""
+    if not text.strip():
+        raise ToolError("toxicity_score requires non-empty text.")
+    try:
+        scores = _get_detoxify().predict(text)
+    except ToolError:
+        raise
+    except Exception as exc:
+        raise ToolError(f"Detoxify scoring failed: {exc}") from exc
+    rounded = {k: round(float(v), 4) for k, v in scores.items()}
+    return {
+        "text_preview": text[:120],
+        "classifier": "detoxify",
+        "scores": rounded,
+        "note": "Advisory toxicity scores (0–1). Weigh as evidence; do NOT copy as your verdict.",
+    }
+
+
+# -- Content-moderation handlers + schemas (main's REGISTRY style) --------------
+
+
+def _classify_safety_handler(args: dict) -> dict:
+    return classify_safety(args.get("text", ""))
+
+
+def _toxicity_score_handler(args: dict) -> dict:
+    return toxicity_score(args.get("text", ""))
+
+
+_CLASSIFY_SAFETY_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "classify_safety",
+        "description": (
+            "Consult IBM Granite Guardian (an open-weight safety classifier) on whether a piece of text "
+            "poses a harm risk. Returns an ADVISORY verdict to reason about — do not copy it as your own. "
+            "Use to get a specialist second opinion on a span you are unsure about."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "The text span to classify for harm risk.",
+                }
+            },
+            "required": ["text"],
+        },
+    },
+}
+
+_TOXICITY_SCORE_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "toxicity_score",
+        "description": (
+            "Score a piece of text for toxicity, threat, insult, and identity attack using Detoxify "
+            "(an open-weight classifier). Returns advisory 0-1 scores per dimension to weigh as evidence."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "The text span to score for toxicity."}
+            },
+            "required": ["text"],
+        },
+    },
+}
+
+_register(_CLASSIFY_SAFETY_SCHEMA, _classify_safety_handler)
+_register(_TOXICITY_SCORE_SCHEMA, _toxicity_score_handler)
+
+TOOL_GROUPS["content_moderation"] = ["search_web", "classify_safety", "toxicity_score"]
