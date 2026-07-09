@@ -264,8 +264,11 @@ def _prerun_url_checks_parallel(assistant_response: str) -> tuple[list[dict], st
 
 # Patterns that capture acronym+expansion pairs in text.
 # Pattern 1: ACRONYM (Expansion) — "NATO (North Atlantic Treaty Organization)"
+# Expansion may start with any script (Latin, Farsi, Arabic, Cyrillic, ...);
+# the multi-word check in _extract_acronym_expansions filters non-expansions.
 _ACR_THEN_EXP = re.compile(
-    r'\b([A-Z]{2,10})\s*\(([A-Za-zÀ-ÿ][^)]{5,100})\)'
+    r'\b([A-Z]{2,10})\s*\((\S[^)]{4,100})\)',
+    re.UNICODE,
 )
 # Pattern 2: Expansion (ACRONYM) — "United Nations (UN)"
 _EXP_THEN_ACR = re.compile(
@@ -274,7 +277,8 @@ _EXP_THEN_ACR = re.compile(
 # Pattern 3: ACRONYM – Expansion (em dash / hyphen separator)
 # e.g. "OFPRA – Office Français de Protection des Réfugiés et Apatrides"
 _ACR_DASH_EXP = re.compile(
-    r'\b([A-Z]{2,10})\s*[–—-]\s*([A-Za-zÀ-ÿ][^\n.!?]{5,80})'
+    r'\b([A-Z]{2,10})\s*[–—-]\s*(\S[^\n.!?]{5,80})',
+    re.UNICODE,
 )
 
 
