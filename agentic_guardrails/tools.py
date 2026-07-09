@@ -405,6 +405,21 @@ _LANG_NAMES: dict[str, str] = {
     "pl": "Polish",
 }
 
+# Native-language terms for "abbreviation"/"acronym", used to build a
+# language-native search query so non-Latin-script languages can turn up
+# native-language sources (an English-only query returns English pages).
+_LANG_ACRONYM_TERMS: dict[str, str] = {
+    "fa": "مخفف",  # abbreviation (Farsi)
+    "ar": "اختصار",  # abbreviation (Arabic)
+    "ru": "расшифровка",  # expansion/decoding (Russian)
+    "zh": "缩写",  # abbreviation (Chinese)
+    "he": "ראשי תיבות",  # initialism (Hebrew)
+}
+
+# Languages whose script is not covered by the Latin word-matching in
+# match scoring below — these get an additional native-language search.
+_NON_LATIN_LANGS = {"fa", "ar", "he", "zh", "ja", "ko", "ru", "uk"}
+
 
 def check_acronym(
     acronym: str,
@@ -419,10 +434,15 @@ def check_acronym(
       • Expansion unverifiable (no relevant results) → −0.05 (unverifiable claim)
       • Expansion confirmed                          → no deduction
     """
-    lang_hint = _LANG_NAMES.get(context_language.lower().split("-")[0], "")
+    lang_code = context_language.lower().split("-")[0]
+    lang_hint = _LANG_NAMES.get(lang_code, "")
+    native_term = _LANG_ACRONYM_TERMS.get(lang_code, "")
+
     query_parts = [acronym, "acronym meaning"]
     if lang_hint and context_language.lower() not in ("en", ""):
         query_parts.append(lang_hint)
+    if native_term:
+        query_parts.append(native_term)
     query = " ".join(query_parts)
 
     try:
@@ -451,6 +471,24 @@ def check_acronym(
     else:
         match_score = 0.0
 
+    # Non-Latin-script expansions won't match English search snippets even
+    # when correct — run a second, native-language search and score against
+    # that instead, taking whichever score is higher.
+    native_results: list[dict] = []
+    if lang_code in _NON_LATIN_LANGS and claimed_words:
+        try:
+            native_results = search_web(f"{acronym} {native_term or lang_hint}", max_results=3)
+        except ToolError:
+            native_results = []
+        if native_results:
+            native_text = " ".join(
+                (r.get("title", "") + " " + r.get("snippet", "")).lower()
+                for r in native_results
+            )
+            native_matched = sum(1 for w in claimed_words if w in native_text)
+            native_score = round(native_matched / len(claimed_words), 2)
+            match_score = max(match_score, native_score)
+
     if match_score >= 0.6:
         verdict_hint = "likely_correct"
     elif results and match_score < 0.25:
@@ -463,7 +501,7 @@ def check_acronym(
         "claimed_expansion": claimed_expansion,
         "match_score": match_score,
         "verdict_hint": verdict_hint,
-        "search_results": results,
+        "search_results": results + native_results,
         "note": (
             "verdict_hint is heuristic. Review search_results to confirm. "
             "Apply −0.10 if the correct expansion clearly differs from claimed_expansion. "
