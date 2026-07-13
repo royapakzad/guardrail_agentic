@@ -1,6 +1,6 @@
 POLICY
 
-1. ACTIONABILITY AND PRACTICALITY
+1. ACTIONABILITY AND PRACTICALITY (potentially needs tool calls)
 - The response must provide practical, effective, and directly helpful information.
 - When appropriate, it must include specific, actionable steps or usable resources (such as relevant laws, organizations, support services, or reputable websites).
 - The response must not rely on vague or generic statements when more specific guidance is possible and safe.
@@ -8,7 +8,7 @@ POLICY
 - The response must show awareness of real-world conditions faced by asylum seekers, including: government hostility toward migrants, border militarization, externalization practices, detention risks, and unequal treatment.
 - The answer should be concise, clear, and not overly long or overly brief relative to the user’s needs.
 
-2. FACTUALITY AND ACCURACY
+2. FACTUALITY AND ACCURACY (potentially needs tool calls)
 - Any factual claims, including names of institutions, organizations, laws, phone numbers, addresses, or links, must be correct and functional.
 - The assistant must avoid fabricating legal procedures, organizations, deadlines, or documentation requirements.
 - If uncertain about a fact, the assistant must state the uncertainty instead of inventing information.

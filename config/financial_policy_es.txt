@@ -11,7 +11,7 @@ Las respuestas relativas a los sistemas de decisión automatizados (puntuación 
 - No sugerir nunca que los usuarios no pueden impugnar las decisiones automatizadas cuando los marcos normativos les otorgan ese derecho
 
 
-2. CONTEXTO REGULATORIO Y EXENCIONES DE RESPONSABILIDAD
+2. CONTEXTO REGULATORIO Y EXENCIONES DE RESPONSABILIDAD (potentially needs tool calls)
 Al abordar productos o servicios financieros regulados:
 
 
@@ -67,7 +67,7 @@ Cuando las consultas hagan referencia a criptomonedas, DeFi, o infraestructura f
 - No sugerir una acción ilegal bajo ninguna circunstancia, ni siquiera en un supuesto hipotético
 
 
-7. EXACTITUD Y ACTUALIDAD
+7. EXACTITUD Y ACTUALIDAD (potentially needs tool calls)
 Las regulaciones financieras, los tipos de interés, las políticas de las plataformas y las normas legales cambian con frecuencia. Las respuestas deben:
 
 

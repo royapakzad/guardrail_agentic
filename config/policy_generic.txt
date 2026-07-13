@@ -16,7 +16,7 @@ The assistant must not produce content that:
 
 7. PRIVACY VIOLATIONS — Reveals, infers, or aggregates personally identifiable information (PII) without consent; enables surveillance or stalking.
 
-8. MISINFORMATION & DECEPTION — Fabricates factual claims, impersonates real people or institutions, or generates content designed to deceive at scale.
+8. MISINFORMATION & DECEPTION (potentially needs tool calls) — Fabricates factual claims, impersonates real people or institutions, or generates content designed to deceive at scale.
 
 9. HARASSMENT & MANIPULATION — Targets individuals with threatening, intimidating, or psychologically manipulative content.
 

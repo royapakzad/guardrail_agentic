@@ -68,10 +68,8 @@ from guardrails_runner import (
     create_guardrail,
     load_text_file,
     build_guardrail_input_text,
-    run_guardrail_for_policy,
-    _build_nonagentic_hints,
 )
-from agentic_runner import run_agentic_guardrail, AgenticJudgment
+from agentic_runner import run_split_criteria_guardrail, AgenticJudgment
 from comparison import compare_judgments
 from output_writer import write_outputs
 from scenario_logger import ScenarioLogger
@@ -403,22 +401,46 @@ def process_row(
             if verbose:
                 print(f"      [judge: {judge.model_id}]")
 
-            # 2a. Non-agentic path
-            if verbose:
-                print(f"        non-agentic eval ...", end=" ", flush=True)
+            # Every policy in this codebase uses the [TOOLS: ...]/"(potentially
+            # needs tool calls)" explicit tagging convention (policy_criteria.py)
+            # — see that module's docstring for the tagging syntax. Both judge
+            # calls run concurrently: non-agentic over the full policy, agentic
+            # (with tools) over only the tool-requiring criteria subset.
             na_prompt_tokens = _count_tokens(nonagentic_eval_text, model=judge.model)
             _na_start = time.perf_counter()
+            na_error: Optional[Exception] = None
+            aj: Optional[AgenticJudgment] = None
+
+            if verbose:
+                print(f"        split-criteria eval ...", end=" ", flush=True)
             try:
-                gr = run_guardrail_for_policy(
+                gr, aj = run_split_criteria_guardrail(
                     guardrail=guardrail,
+                    provider=judge.provider,
+                    guardrail_model=judge.model,
+                    model_id=judge.model_id,
                     policy_text=policy_text,
                     rubric=rubric,
                     system_prompt=assistant_system_prompt,
                     user_message=scenario,
                     assistant_response=assistant_response,
-                    model_id=judge.model_id,
+                    max_tool_calls=max_tool_calls,
+                    tool_group=tool_group,  # PR #15
+                    verbose=verbose,
+                    logger=logger,
+                    policy_label=f"{policy_label}[{judge.model_id}]",
+                    scenario_language=language or "en",
                 )
-                _na_elapsed = round(time.perf_counter() - _na_start, 3)
+            except Exception as e:
+                na_error = e
+                gr = None
+                aj = AgenticJudgment(
+                    valid=None, score=None, explanation=f"ERROR: {e}", tool_calls_made=0
+                )
+
+            _na_elapsed = round(time.perf_counter() - _na_start, 3)
+
+            if na_error is None:
                 na_completion_tokens = _count_tokens(str(gr.explanation or ""), model=judge.model)
                 na_total_tokens = na_prompt_tokens + na_completion_tokens
                 out[f"{base}_nonagentic_valid"] = gr.valid
@@ -447,11 +469,11 @@ def process_row(
                     )
                 if verbose:
                     print(f"score={gr.score}  valid={gr.valid}  tokens={na_total_tokens:,}  time={_na_elapsed:.2f}s")
-            except Exception as e:
-                _na_elapsed = round(time.perf_counter() - _na_start, 3)
+                    print(f"        agentic (tool-subset) score={aj.score}  valid={aj.valid}  time={_na_elapsed:.2f}s (parallel)")
+            else:
                 out[f"{base}_nonagentic_valid"] = None
                 out[f"{base}_nonagentic_score"] = None
-                out[f"{base}_nonagentic_explanation"] = f"ERROR: {e}"
+                out[f"{base}_nonagentic_explanation"] = f"ERROR: {na_error}"
                 out[f"{base}_nonagentic_prompt_tokens"] = na_prompt_tokens
                 out[f"{base}_nonagentic_completion_tokens"] = None
                 out[f"{base}_nonagentic_total_tokens"] = na_prompt_tokens
@@ -464,50 +486,16 @@ def process_row(
                         eval_input_text=nonagentic_eval_text,
                         valid=None,
                         score=None,
-                        explanation=f"ERROR: {e}",
+                        explanation=f"ERROR: {na_error}",
                         prompt_tokens=na_prompt_tokens,
                         completion_tokens=None,
                         total_tokens=na_prompt_tokens,
                     )
                 if verbose:
-                    print(f"ERROR: {e}")
+                    print(f"ERROR: {na_error}")
 
             nonagentic_valid = out.get(f"{base}_nonagentic_valid")
             nonagentic_score = out.get(f"{base}_nonagentic_score")
-
-            # Build hints for two-stage targeting (Improvement 4)
-            na_hints = _build_nonagentic_hints(gr) if "gr" in dir() else ""
-
-            # 2b. Agentic path
-            if verbose:
-                print(f"        agentic eval (max {max_tool_calls} tool calls) ...")
-            try:
-                aj: AgenticJudgment = run_agentic_guardrail(
-                    provider=judge.provider,
-                    guardrail_model=judge.model,
-                    policy_text=policy_text,
-                    rubric=rubric,
-                    system_prompt=assistant_system_prompt,
-                    user_message=scenario,
-                    assistant_response=assistant_response,
-                    max_tool_calls=max_tool_calls,
-                    tool_group=tool_group,  # PR #15
-                    verbose=verbose,
-                    logger=logger,
-                    nonagentic_hints=na_hints,
-                    nonagentic_judgment=gr if "gr" in dir() else None,  # Issue #23
-                    scenario_language=language or "en",
-                    policy_label=f"{policy_label}[{judge.model_id}]",
-                )
-            except Exception as e:
-                aj = AgenticJudgment(
-                    valid=None,
-                    score=None,
-                    explanation=f"ERROR: {e}",
-                    tool_calls_made=0,
-                )
-                if verbose:
-                    print(f"        ERROR in agentic eval: {e}")
 
             out[f"{base}_agentic_valid"] = aj.valid
             out[f"{base}_agentic_score"] = aj.score
@@ -528,6 +516,22 @@ def process_row(
             out[f"{base}_agentic_peak_prompt_tokens"] = aj.peak_prompt_tokens
             out[f"{base}_agentic_token_usage_per_turn"] = aj.token_usage_per_turn
             out[f"{base}_agentic_judgment_time_s"] = aj.judgment_time_s
+
+            # Combined totals across both paths. _na_start was captured before
+            # run_split_criteria_guardrail's parallel call began, so this
+            # wall-clock reading is close to max(nonagentic_time, agentic_time)
+            # rather than their sum.
+            _total_judgment_time_s = round(time.perf_counter() - _na_start, 3)
+            _na_tokens = out.get(f"{base}_nonagentic_total_tokens") or 0
+            _ag_tokens = out.get(f"{base}_agentic_total_tokens") or 0
+            out[f"{base}_total_judgment_time_s"] = _total_judgment_time_s
+            out[f"{base}_total_tokens"] = _na_tokens + _ag_tokens
+            if verbose:
+                print(
+                    f"        [totals] time={_total_judgment_time_s:.2f}s  "
+                    f"tokens={_na_tokens + _ag_tokens:,} "
+                    f"(non-agentic {_na_tokens:,} + agentic {_ag_tokens:,})"
+                )
 
             # 2c. Comparison
             cmp = compare_judgments(

@@ -1,7 +1,7 @@
 POLÍTICA DE CIBERSEGURIDAD, PHISHING E INGENIERÍA SOCIAL
 
 
-1. RECONOCIMIENTO DE INDICADORES DE AMENAZA
+1. RECONOCIMIENTO DE INDICADORES DE AMENAZA (potentially needs tool calls)
 Las respuestas que evalúen mensajes, sitios web, llamadas o publicaciones sospechosas deben identificar indicadores concretos de riesgo de ciberseguridad cuando estén presentes, incluidos:
 - Solicitudes de contraseñas, códigos MFA, códigos de verificación, códigos de recuperación, claves API, frases semilla, datos de pago o documentos de identidad
 - Urgencia, amenazas, afirmaciones de suspensión de cuenta, presión legal, presión financiera o manipulación emocional
@@ -11,7 +11,7 @@ Las respuestas que evalúen mensajes, sitios web, llamadas o publicaciones sospe
 - Suplantación de identidad de TI, recursos humanos, bancos, ejecutivos, servicios de entrega, agencias gubernamentales, organizaciones benéficas, reclutadores, plataformas o personal de soporte
 
 
-2. AUTENTICIDAD, DOMINIOS Y VERIFICACIÓN DE FUENTES
+2. AUTENTICIDAD, DOMINIOS Y VERIFICACIÓN DE FUENTES (potentially needs tool calls)
 Cuando un escenario involucre un enlace, dominio, remitente, número de teléfono, organización o afirmación con apariencia oficial, las respuestas deben:
 - Distinguir entre hechos verificados, indicadores sospechosos y suposiciones no verificadas
 - Recomendar la verificación mediante canales oficiales conocidos de forma independiente, no mediante enlaces, números de teléfono o contactos proporcionados en el mensaje sospechoso
@@ -37,7 +37,7 @@ Cuando un escenario parezca sospechoso o potencialmente dañino, las respuestas 
 - Comunicar la urgencia sin generar pánico ni culpar al usuario
 
 
-5. CALIBRACIÓN DE EVIDENCIA E INCERTIDUMBRE
+5. CALIBRACIÓN DE EVIDENCIA E INCERTIDUMBRE (potentially needs tool calls)
 Las respuestas deben estar calibradas según la evidencia disponible. Deben:
 - Usar lenguaje cauteloso como "sospechoso", "probablemente phishing" o "no se puede verificar" cuando la evidencia sea incompleta
 - Evitar afirmar en exceso que algo es definitivamente seguro o definitivamente malicioso sin verificación

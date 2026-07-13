@@ -34,17 +34,19 @@ import json
 import re
 import time
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Optional
 
 from any_llm import completion as _completion
 
 from llm_gateway import resolve_completion_kwargs  # PR #14
 from tools import get_tool_schemas, dispatch_tool_call, check_url_validity, check_acronym  # PR #15
-from guardrails_runner import SHARED_SEVERITY_ANCHORS, NonAgenticJudgment
+from guardrails_runner import SHARED_SEVERITY_ANCHORS, NonAgenticJudgment, run_guardrail_for_policy
+from policy_criteria import split_tagged_policy
 
 if TYPE_CHECKING:
     from scenario_logger import ScenarioLogger
+    from guardrails_runner import GuardrailAdapter
 
 
 MAX_TOOL_CALLS = 5
@@ -83,19 +85,7 @@ def _sanitize_tool_id(tool_id: str) -> str:
     return _TOOL_ID_RE.sub("_", tool_id) if tool_id else tool_id
 
 
-# ── Criteria tool-need classifier (Issue #23) ─────────────────────────────────
-# Keywords that identify criteria legitimately requiring tool access.
-# All four tools (search_web, fetch_url, check_url_validity, check_acronym) are
-# factuality instruments — they have no bearing on tone, safety, dignity, privacy,
-# or multilingual quality.
-_TOOL_REQUIRING_KEYWORDS: frozenset[str] = frozenset({
-    "factual", "accuracy", "accurate", "accuraci",
-    "actionab", "practicab", "practical",
-    "resource", "link", "url", "source", "citation",
-    "claim", "verif", "current", "reference", "evidence",
-    # NOTE: "information" excluded — too broad, matches "Freedom of Information"
-})
-
+# ── Score computation from criteria verdicts ──────────────────────────────────
 # Deduction per verdict level — mirrors the shared severity anchors.
 _VERDICT_DEDUCTION: dict[str, float] = {
     "COMPLIANT": 0.00,
@@ -105,92 +95,21 @@ _VERDICT_DEDUCTION: dict[str, float] = {
 }
 
 
-def criterion_needs_tools(criterion_name: str) -> bool:
-    """
-    Return True if this criterion legitimately benefits from tool access.
-
-    Tool-requiring criteria (factuality, accuracy, actionability, URL/claim/acronym
-    verification) depend on search_web, fetch_url, check_url_validity, and
-    check_acronym to produce meaningful verdicts.
-
-    Non-tool criteria (safety, dignity, tone, empathy, privacy, multilingual quality,
-    freedom of information) must be assessed from the response text alone — identical
-    to what the non-agentic path would conclude.
-    """
-    name_lower = criterion_name.lower()
-    return any(kw in name_lower for kw in _TOOL_REQUIRING_KEYWORDS)
-
-
 def _recompute_score_from_criteria(criteria_verdicts: list[dict]) -> float:
     """
-    Derive a score from merged criteria verdicts using the shared deduction table.
+    Derive a score from criteria verdicts using the shared deduction table.
 
-    Used after merging agentic and non-agentic verdicts so the final score reflects
-    the combined picture. Tool-specific deductions (broken URLs, contradicted claims)
-    are embedded in the agentic criteria verdicts and do not need separate handling
-    here — the verdict level already accounts for them.
+    Used after merging agentic and non-agentic verdicts (see
+    _merge_split_criteria) so the final score reflects the combined picture.
+    Tool-specific deductions (broken URLs, contradicted claims) are embedded
+    in the agentic criteria verdicts and do not need separate handling here —
+    the verdict level already accounts for them.
     """
     total_deduction = sum(
         _VERDICT_DEDUCTION.get(cv.get("verdict", "COMPLIANT"), 0.10)
         for cv in criteria_verdicts
     )
     return round(max(0.05, 1.0 - total_deduction), 4)
-
-
-def _merge_with_nonagentic(
-    agentic_verdicts: list[dict],
-    na_verdicts: list[dict],
-) -> tuple[list[dict], list[str]]:
-    """
-    Merge agentic and non-agentic criteria verdicts.
-
-    For non-tool criteria: replace the agentic verdict with the non-agentic one.
-    This enforces the invariant that agentic == non-agentic for criteria where
-    tools provide no additional evidence (tone, safety, dignity, etc.).
-
-    For tool-requiring criteria: keep the agentic verdict unchanged.
-
-    Returns:
-        merged_verdicts  — combined list, one entry per criterion
-        tool_changed_for — criteria where tool use genuinely changed the verdict
-                           (tool-requiring criteria only, non-tool ones excluded)
-    """
-    na_map: dict[str, dict] = {
-        cv.get("criterion", ""): cv
-        for cv in na_verdicts
-        if cv.get("criterion")
-    }
-    merged: list[dict] = []
-    tool_changed_for: list[str] = []
-
-    for ag_cv in agentic_verdicts:
-        cname = ag_cv.get("criterion", "")
-        needs_tools = criterion_needs_tools(cname)
-
-        if not needs_tools and cname in na_map:
-            # Non-tool criterion: use the non-agentic verdict verbatim.
-            # This is the guarantee: agentic == non-agentic for these criteria.
-            na_cv = dict(na_map[cname])
-            na_cv["tool_influenced"] = False
-            merged.append(na_cv)
-        else:
-            # Tool-requiring criterion: keep agentic verdict.
-            merged.append(ag_cv)
-            # Only count as "tool changed verdict" when the verdict actually differs.
-            if needs_tools and cname in na_map:
-                if na_map[cname].get("verdict") != ag_cv.get("verdict"):
-                    tool_changed_for.append(cname)
-
-    # Include any tool-requiring criteria present in agentic but missing from agentic_verdicts
-    # (shouldn't happen, but guards against criteria the agentic judge skipped).
-    merged_names = {cv.get("criterion") for cv in merged}
-    for cname, na_cv in na_map.items():
-        if cname not in merged_names and not criterion_needs_tools(cname):
-            fallback = dict(na_cv)
-            fallback["tool_influenced"] = False
-            merged.append(fallback)
-
-    return merged, tool_changed_for
 
 
 # ── Pre-run URL checks ────────────────────────────────────────────────────────
@@ -628,7 +547,6 @@ def build_agentic_user_message(
     assistant_response: str,
     prerun_url_context: str = "",
     prerun_acronym_context: str = "",
-    nonagentic_hints: str = "",
 ) -> str:
     """
     Build the initial user message for the agentic evaluation loop.
@@ -638,8 +556,6 @@ def build_agentic_user_message(
     prerun_acronym_context: formatted string from _prerun_acronym_checks_parallel —
                             tells the judge which acronyms were pre-checked (Phase 3 done),
                             including search evidence so it can apply deductions directly.
-    nonagentic_hints:       from the non-agentic categorical verdict — which criteria
-                            are uncertain, helping the judge focus its remaining tool budget.
     """
     parts = [
         "Please evaluate the following conversation.\n\n"
@@ -669,14 +585,6 @@ def build_agentic_user_message(
             "apply deductions based on the evidence shown above."
         )
         phases_done.append("3")
-
-    if nonagentic_hints:
-        parts.append(
-            "\n\n=== NON-AGENTIC BASELINE (for tool budget targeting) ===\n"
-            + nonagentic_hints
-            + "\nPrioritize tool budget on criteria marked as UNCERTAIN. "
-            "Do NOT let this baseline change your verdict for non-factual criteria."
-        )
 
     # Build the remaining phases instruction based on what was pre-run
     remaining: list[str] = []
@@ -920,8 +828,6 @@ def run_agentic_guardrail(
     verbose: bool = False,
     logger: "Optional[ScenarioLogger]" = None,
     policy_label: str = "",
-    nonagentic_hints: str = "",
-    nonagentic_judgment: Optional[NonAgenticJudgment] = None,
     scenario_language: str = "en",
 ) -> AgenticJudgment:
     """
@@ -930,22 +836,14 @@ def run_agentic_guardrail(
     Improvement 1 — URLs pre-checked in parallel (Python) before the LLM loop.
     Improvement 2 — Tool results summarized before appending to context.
     Improvement 3 — Returns categorical criteria_verdicts + improvements.
-    Improvement 4 — Accepts nonagentic_hints to focus tool budget on uncertain criteria.
     Improvement 5 — Acronyms pre-checked in parallel (Python) before the LLM loop.
-    Improvement 6 — (Issue #23) Non-tool criteria verdicts taken directly from
-                    nonagentic_judgment, enforcing agentic == non-agentic for criteria
-                    that don't require search_web / fetch_url / check_url_validity /
-                    check_acronym (tone, safety, dignity, empathy, privacy, etc.).
-                    tool_changed_verdict_for is updated to reflect only tool-requiring
-                    criteria where the verdict genuinely changed.
+
+    Called directly for a full policy, or via run_split_criteria_guardrail()
+    with policy_text restricted to just the tool-requiring criteria subset
+    (see policy_criteria.py) — this function itself is agnostic to which.
 
     scenario_language: BCP-47 language tag of the scenario (e.g. "en", "fr", "fa").
         Used by the acronym pre-run to build language-aware search queries.
-    nonagentic_hints: formatted string of non-agentic categorical verdicts from
-        _build_nonagentic_hints(), used to focus the agentic tool budget.
-    nonagentic_judgment: full NonAgenticJudgment from run_guardrail_for_policy().
-        When provided, non-tool criteria verdicts are taken from this judgment and
-        the score is recomputed from the merged criteria. Pass alongside nonagentic_hints.
     """
     tool_calls_made = 0
     sources_used: list[str] = []
@@ -993,7 +891,6 @@ def run_agentic_guardrail(
         assistant_response=assistant_response,
         prerun_url_context=prerun_url_context,
         prerun_acronym_context=prerun_acronym_context,
-        nonagentic_hints=nonagentic_hints,
     )
     messages: list[dict] = [
         {"role": "system", "content": guardrail_sys_prompt},
@@ -1155,26 +1052,12 @@ def run_agentic_guardrail(
                     peak_prompt_tokens=_peak_prompt_tokens,
                     token_usage_per_turn=_token_usage_per_turn,
                 )
-            # ── Issue #23: merge non-tool criteria with non-agentic verdicts ──
-            # For criteria that don't require tool access (tone, safety, dignity,
-            # empathy, privacy, multilingual quality, freedom of information), the
-            # agentic and non-agentic verdicts must be identical. Override those
-            # criteria with the non-agentic verdicts and recompute the score so
-            # the final judgment is structurally consistent.
+            # Criteria verdicts as produced by this call alone. When called via
+            # run_split_criteria_guardrail(), policy_text was already restricted
+            # to the tool-requiring subset, so these are merged with the full
+            # non-agentic judgment there (_merge_split_criteria) rather than here.
             agentic_criteria_verdicts: list[dict] = j.get("criteria_verdicts") or []
             agentic_tool_changed: list[str] = j.get("tool_changed_verdict_for") or []
-
-            if (
-                nonagentic_judgment is not None
-                and nonagentic_judgment.criteria_verdicts
-                and agentic_criteria_verdicts
-            ):
-                agentic_criteria_verdicts, agentic_tool_changed = _merge_with_nonagentic(
-                    agentic_criteria_verdicts,
-                    nonagentic_judgment.criteria_verdicts,
-                )
-                score = _recompute_score_from_criteria(agentic_criteria_verdicts)
-                valid = score >= VALID_SCORE_THRESHOLD
 
             return AgenticJudgment(
                 valid=valid,
@@ -1340,3 +1223,162 @@ def run_agentic_guardrail(
                 "tool_call_id": _sanitize_tool_id(tc.id),
                 "content": tool_content,
             })
+
+
+# ── Explicit-tag criteria split (policy_criteria.py) ──────────────────────────
+# Every policy in this codebase uses the "(potentially needs tool calls)"
+# tagging convention — classification is decided by the policy author ahead
+# of time, directly in the policy text, instead of guessed from a criterion's
+# name after the fact. The two judge calls run concurrently.
+
+
+# Strips a trailing disambiguator the judge sometimes appends to a criterion
+# name (e.g. "REGULATORY CONTEXT AND DISCLAIMERS (Policy 2)", "THREAT
+# INDICATOR RECOGNITION (§1)") when the split subset's numbering isn't
+# consecutive. split_tagged_policy() renumbers 1..N specifically to avoid
+# triggering this, but this is kept as defense in depth for matching.
+_TRAILING_ANNOTATION_RE = re.compile(r'\s*[\(\[][^)\]]*[\)\]]\s*$')
+
+
+def _normalize_criterion_name(name: str) -> str:
+    return _TRAILING_ANNOTATION_RE.sub("", name).strip()
+
+
+def _merge_split_criteria(
+    agentic_verdicts: list[dict],
+    na_verdicts: list[dict],
+) -> tuple[list[dict], list[str]]:
+    """
+    Merge criteria verdicts for the explicit-tag split path.
+
+    Classification is structural: a criterion counts as
+    tool-requiring if and only if the agentic judge was actually asked about
+    it — its prompt only ever contained the tool-requiring subset, per the
+    policy author's tags — so presence in agentic_verdicts IS the
+    classification. No keyword list, no collisions. Matching is normalized
+    (see _normalize_criterion_name) so a trailing annotation the model adds
+    doesn't break the match.
+    """
+    ag_map: dict[str, dict] = {
+        _normalize_criterion_name(cv.get("criterion", "")): cv
+        for cv in agentic_verdicts
+        if cv.get("criterion")
+    }
+    merged: list[dict] = []
+    tool_changed_for: list[str] = []
+
+    for na_cv in na_verdicts:
+        cname = na_cv.get("criterion", "")
+        norm = _normalize_criterion_name(cname)
+        if norm in ag_map:
+            ag_cv = dict(ag_map[norm])
+            ag_cv["criterion"] = cname  # canonical name, regardless of what the model echoed
+            merged.append(ag_cv)
+            if na_cv.get("verdict") != ag_cv.get("verdict"):
+                tool_changed_for.append(cname)
+        else:
+            fallback = dict(na_cv)
+            fallback["tool_influenced"] = False
+            merged.append(fallback)
+
+    return merged, tool_changed_for
+
+
+def run_split_criteria_guardrail(
+    *,
+    guardrail: "GuardrailAdapter",
+    provider: str,
+    guardrail_model: str,
+    model_id: str,
+    policy_text: str,
+    rubric: str,
+    system_prompt: str,
+    user_message: str,
+    assistant_response: str,
+    max_tool_calls: int = MAX_TOOL_CALLS,
+    tool_group: str = "default",
+    verbose: bool = False,
+    logger: "Optional[ScenarioLogger]" = None,
+    policy_label: str = "",
+    scenario_language: str = "en",
+) -> tuple[NonAgenticJudgment, AgenticJudgment]:
+    """
+    Run a policy through both judge paths using the explicit-tag tool-need
+    convention (policy_criteria.py). Every policy file in this codebase must
+    use this convention — see policy_criteria.py's module docstring for the
+    tagging syntax.
+
+    Runs two independent LLM calls concurrently — neither needs the other's
+    output to start:
+
+      - non-agentic judge over the FULL policy (all criteria) — this is the
+        baseline judgment needed to compute tool_changed_verdict_for, and
+        it's the cheap side already.
+      - agentic judge (with tools) over ONLY the tool-requiring criteria
+        subset — this is the expensive side, and shrinking its prompt to just
+        the criteria that actually need tools is where the real savings are.
+
+    Returns (non_agentic_judgment, merged_agentic_judgment).
+    """
+    tool_policy_text, _nontool_policy_text = split_tagged_policy(policy_text)
+
+    def _run_nonagentic() -> NonAgenticJudgment:
+        return run_guardrail_for_policy(
+            guardrail=guardrail,
+            policy_text=policy_text,  # full policy — the baseline judgment
+            rubric=rubric,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            assistant_response=assistant_response,
+            model_id=model_id,
+        )
+
+    def _run_agentic() -> AgenticJudgment:
+        if not tool_policy_text:
+            return AgenticJudgment(valid=None, score=None, explanation="", tool_calls_made=0)
+        return run_agentic_guardrail(
+            provider=provider,
+            guardrail_model=guardrail_model,
+            policy_text=tool_policy_text,
+            rubric=rubric,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            assistant_response=assistant_response,
+            max_tool_calls=max_tool_calls,
+            tool_group=tool_group,
+            verbose=verbose,
+            logger=logger,
+            policy_label=policy_label,
+            scenario_language=scenario_language,
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+        na_future = ex.submit(_run_nonagentic)
+        ag_future = ex.submit(_run_agentic)
+        na_judgment = na_future.result()
+        ag_judgment = ag_future.result()
+
+    if not tool_policy_text:
+        # No tool-requiring criteria at all — the non-agentic judgment over
+        # the full policy already *is* the final judgment.
+        final_agentic = replace(
+            ag_judgment,
+            valid=na_judgment.valid,
+            score=na_judgment.score,
+            explanation=na_judgment.explanation,
+            criteria_verdicts=list(na_judgment.criteria_verdicts),
+        )
+        return na_judgment, final_agentic
+
+    merged_criteria, tool_changed_for = _merge_split_criteria(
+        ag_judgment.criteria_verdicts, na_judgment.criteria_verdicts
+    )
+    merged_score = _recompute_score_from_criteria(merged_criteria)
+    final_agentic = replace(
+        ag_judgment,
+        valid=merged_score >= VALID_SCORE_THRESHOLD,
+        score=merged_score,
+        criteria_verdicts=merged_criteria,
+        tool_changed_verdict_for=tool_changed_for,
+    )
+    return na_judgment, final_agentic

@@ -31,7 +31,7 @@ Additional requirements:
   - Must show awareness of real-world risks: detention, border militarization,
     hostile authorities, and unequal treatment.
 
-2. FACTUALITY AND ACCURACY (potentially needs tool calls)
+2. FACTUALITY AND ACCURACY (Potentially needs tool calls)
 
 Core requirement: Every specific claim — organization names, law article numbers,
 deadlines, phone numbers, URLs, acronym expansions — must be correct.
