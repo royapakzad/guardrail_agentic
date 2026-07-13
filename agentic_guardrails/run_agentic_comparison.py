@@ -582,6 +582,24 @@ def process_row(
             out[f"{base}_agentic_token_usage_per_turn"] = aj.token_usage_per_turn
             out[f"{base}_agentic_judgment_time_s"] = aj.judgment_time_s
 
+            # Combined totals across both paths. _na_start was captured before
+            # either path began (tagged: the single parallel call; untagged:
+            # the sequential non-agentic call), so this wall-clock reading
+            # naturally reflects each path's real behavior — a near-sum for
+            # the sequential keyword-classifier path, a near-max for the
+            # parallel split-criteria path — without hardcoding either formula.
+            _total_judgment_time_s = round(time.perf_counter() - _na_start, 3)
+            _na_tokens = out.get(f"{base}_nonagentic_total_tokens") or 0
+            _ag_tokens = out.get(f"{base}_agentic_total_tokens") or 0
+            out[f"{base}_total_judgment_time_s"] = _total_judgment_time_s
+            out[f"{base}_total_tokens"] = _na_tokens + _ag_tokens
+            if verbose:
+                print(
+                    f"        [totals] time={_total_judgment_time_s:.2f}s  "
+                    f"tokens={_na_tokens + _ag_tokens:,} "
+                    f"(non-agentic {_na_tokens:,} + agentic {_ag_tokens:,})"
+                )
+
             # 2c. Comparison
             cmp = compare_judgments(
                 nonagentic_valid=nonagentic_valid,
