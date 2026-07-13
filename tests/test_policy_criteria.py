@@ -91,6 +91,33 @@ def test_split_tagged_policy_preserves_preamble_in_both_halves():
     assert nontool_text.startswith("POLICY")
 
 
+def test_split_tagged_policy_renumbers_consecutively():
+    # Tool-requiring criteria are #1 and #4 here — non-consecutive. A judge
+    # shown "1." then "4." with nothing between tends to self-annotate its
+    # output to disambiguate (e.g. "NAME (Policy 4)"), breaking merge
+    # matching — so the split subset must renumber to 1, 2 instead of 1, 4.
+    policy = """POLICY
+
+1. ACTIONABILITY AND PRACTICALITY (potentially needs tool calls)
+- Must be actionable.
+
+2. SAFETY, SECURITY, AND PRIVACY
+- Must not cause harm.
+
+3. TONE, DIGNITY, AND EMPATHY
+- Must be respectful.
+
+4. FACTUALITY AND ACCURACY (potentially needs tool calls)
+- Must be correct.
+"""
+    tool_text, nontool_text = pc.split_tagged_policy(policy)
+    assert "1. ACTIONABILITY AND PRACTICALITY" in tool_text
+    assert "2. FACTUALITY AND ACCURACY" in tool_text
+    assert "4. FACTUALITY AND ACCURACY" not in tool_text
+    assert "1. SAFETY, SECURITY, AND PRIVACY" in nontool_text
+    assert "2. TONE, DIGNITY, AND EMPATHY" in nontool_text
+
+
 def test_split_tagged_policy_empty_half_when_nothing_matches():
     all_nontool = """POLICY
 

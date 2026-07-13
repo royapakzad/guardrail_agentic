@@ -1232,6 +1232,18 @@ def run_agentic_guardrail(
 # name after the fact. The two judge calls run concurrently.
 
 
+# Strips a trailing disambiguator the judge sometimes appends to a criterion
+# name (e.g. "REGULATORY CONTEXT AND DISCLAIMERS (Policy 2)", "THREAT
+# INDICATOR RECOGNITION (§1)") when the split subset's numbering isn't
+# consecutive. split_tagged_policy() renumbers 1..N specifically to avoid
+# triggering this, but this is kept as defense in depth for matching.
+_TRAILING_ANNOTATION_RE = re.compile(r'\s*[\(\[][^)\]]*[\)\]]\s*$')
+
+
+def _normalize_criterion_name(name: str) -> str:
+    return _TRAILING_ANNOTATION_RE.sub("", name).strip()
+
+
 def _merge_split_criteria(
     agentic_verdicts: list[dict],
     na_verdicts: list[dict],
@@ -1243,18 +1255,24 @@ def _merge_split_criteria(
     tool-requiring if and only if the agentic judge was actually asked about
     it — its prompt only ever contained the tool-requiring subset, per the
     policy author's tags — so presence in agentic_verdicts IS the
-    classification. No keyword list, no collisions.
+    classification. No keyword list, no collisions. Matching is normalized
+    (see _normalize_criterion_name) so a trailing annotation the model adds
+    doesn't break the match.
     """
     ag_map: dict[str, dict] = {
-        cv.get("criterion", ""): cv for cv in agentic_verdicts if cv.get("criterion")
+        _normalize_criterion_name(cv.get("criterion", "")): cv
+        for cv in agentic_verdicts
+        if cv.get("criterion")
     }
     merged: list[dict] = []
     tool_changed_for: list[str] = []
 
     for na_cv in na_verdicts:
         cname = na_cv.get("criterion", "")
-        if cname in ag_map:
-            ag_cv = ag_map[cname]
+        norm = _normalize_criterion_name(cname)
+        if norm in ag_map:
+            ag_cv = dict(ag_map[norm])
+            ag_cv["criterion"] = cname  # canonical name, regardless of what the model echoed
             merged.append(ag_cv)
             if na_cv.get("verdict") != ag_cv.get("verdict"):
                 tool_changed_for.append(cname)

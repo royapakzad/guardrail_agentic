@@ -53,6 +53,22 @@ def test_merge_no_change_when_verdicts_match():
     assert changed == []
 
 
+def test_merge_tolerates_model_added_disambiguator():
+    # Judge sometimes appends "(Policy 2)" / "(§1)" style annotations to a
+    # criterion name when the split subset's numbering isn't consecutive.
+    # The merge must still match it against the clean non-agentic name.
+    agentic = [{"criterion": "REGULATORY CONTEXT AND DISCLAIMERS (Policy 2)", "verdict": "MINOR_ISSUE"}]
+    na = [
+        {"criterion": "REGULATORY CONTEXT AND DISCLAIMERS", "verdict": "MAJOR_ISSUE"},
+        {"criterion": "ACCURACY AND CURRENCY", "verdict": "COMPLIANT"},
+    ]
+    merged, changed = _merge_split_criteria(agentic, na)
+
+    reg = next(c for c in merged if c["criterion"] == "REGULATORY CONTEXT AND DISCLAIMERS")
+    assert reg["verdict"] == "MINOR_ISSUE"  # agentic verdict kept despite the annotation
+    assert changed == ["REGULATORY CONTEXT AND DISCLAIMERS"]  # canonical name in output, not the annotated one
+
+
 # ── run_split_criteria_guardrail ────────────────────────────────────────────────
 
 TAGGED_POLICY = """POLICY

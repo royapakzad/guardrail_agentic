@@ -94,13 +94,28 @@ def split_tagged_policy(policy_text: str) -> tuple[str, str]:
     line) is preserved in both halves. Either half may be an empty string if
     no criteria fall on that side — callers should treat an empty half as
     "skip this evaluation, nothing to judge."
+
+    Each half is renumbered 1..N consecutively rather than keeping the
+    criteria's original (possibly non-consecutive) numbers. A judge shown
+    "2. X" and "7. Y" with nothing in between tends to notice the gap and
+    self-annotate its output as e.g. "X (Policy 2)" to disambiguate — which
+    then fails to match the clean criterion name during merge. Consecutive
+    numbering removes the model's reason to do that in the first place.
     """
     criteria = parse_tagged_criteria(policy_text)
     first_header_pos = _HEADER_RE.search(policy_text).start()
     preamble = policy_text[:first_header_pos].rstrip()
 
-    tool_bodies = [c["body"] for c in criteria if c["needs_tools"]]
-    nontool_bodies = [c["body"] for c in criteria if not c["needs_tools"]]
+    def _renumbered_body(c: dict, new_number: int) -> str:
+        original_header = f"{c['number']}. {c['name']}"
+        new_header = f"{new_number}. {c['name']}"
+        return c["body"].replace(original_header, new_header, 1)
+
+    tool_criteria = [c for c in criteria if c["needs_tools"]]
+    nontool_criteria = [c for c in criteria if not c["needs_tools"]]
+
+    tool_bodies = [_renumbered_body(c, i + 1) for i, c in enumerate(tool_criteria)]
+    nontool_bodies = [_renumbered_body(c, i + 1) for i, c in enumerate(nontool_criteria)]
 
     def _assemble(bodies: list[str]) -> str:
         if not bodies:
