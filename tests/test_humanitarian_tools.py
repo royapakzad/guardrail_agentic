@@ -8,6 +8,9 @@ def test_humanitarian_group_registered():
     names = [s["function"]["name"] for s in get_tool_schemas("humanitarian")]
     assert names == [
         "search_web",
+        "fetch_url",
+        "check_url_validity",
+        "check_acronym",
         "reliefweb_situation",
         "disaster_alert",
         "health_advisory",
