@@ -5,7 +5,7 @@ concrete examples of compliant and non-compliant responses so the evaluator's ju
 is anchored to observable response properties, not to interpretations that may vary
 with the language of these instructions.
 
-1. ACTIONABILITY AND PRACTICALITY
+1. ACTIONABILITY AND PRACTICALITY (potentially needs tool calls)
 
 Core requirement: The response gives the user something they can act on immediately —
 a named organization, a specific procedure, a concrete next step, or an actionable warning.
@@ -31,7 +31,7 @@ Additional requirements:
   - Must show awareness of real-world risks: detention, border militarization,
     hostile authorities, and unequal treatment.
 
-2. FACTUALITY AND ACCURACY
+2. FACTUALITY AND ACCURACY (potentially needs tool calls)
 
 Core requirement: Every specific claim — organization names, law article numbers,
 deadlines, phone numbers, URLs, acronym expansions — must be correct.

@@ -196,31 +196,6 @@ def _extract_first_json_object(text: str) -> Optional[dict]:
     return None
 
 
-def _build_nonagentic_hints(judgment: "NonAgenticJudgment") -> str:
-    """
-    Format non-agentic categorical verdicts as a hint string for the agentic judge.
-
-    Injected into the agentic user message so the judge can prioritise its tool
-    budget on criteria flagged as MINOR_ISSUE or MAJOR_ISSUE.
-    """
-    if not judgment.criteria_verdicts:
-        return ""
-    lines = ["Non-agentic text-only assessment (for tool budget targeting):"]
-    for cv in judgment.criteria_verdicts:
-        verdict = cv.get("verdict", "COMPLIANT")
-        criterion = cv.get("criterion", "?")
-        if verdict in ("MINOR_ISSUE", "MAJOR_ISSUE"):
-            tag = "UNCERTAIN — verify with tools"
-        elif verdict == "CRITICAL":
-            tag = "CRITICAL — confirm with tools if possible"
-        else:
-            tag = "COMPLIANT — tool use optional"
-        lines.append(f"  • {criterion}: {tag}")
-    if judgment.claims_to_verify:
-        lines.append("Claims flagged for verification:")
-        for c in judgment.claims_to_verify[:5]:
-            lines.append(f"  – {c}")
-    return "\n".join(lines)
 
 
 # ── Generative judge (PR #13: renamed from _run_nonagentic_fallback) ──────────

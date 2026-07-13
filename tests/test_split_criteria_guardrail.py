@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agentic_guardr
 import agentic_runner
 from agentic_runner import (
     _merge_split_criteria,
+    _recompute_score_from_criteria,
     run_split_criteria_guardrail,
     AgenticJudgment,
 )
@@ -158,3 +159,26 @@ def test_split_criteria_guardrail_skips_agentic_when_no_tool_criteria(monkeypatc
 
     assert aj.score == gr.score == 1.0
     assert aj.criteria_verdicts == gr.criteria_verdicts
+
+
+# ── _recompute_score_from_criteria ──────────────────────────────────────────────
+
+def _cv(criterion, verdict):
+    return {"criterion": criterion, "verdict": verdict, "explanation": "test"}
+
+
+def test_score_all_compliant():
+    verdicts = [_cv("A", "COMPLIANT"), _cv("B", "COMPLIANT")]
+    assert _recompute_score_from_criteria(verdicts) == 1.0
+
+
+def test_score_one_major_issue():
+    verdicts = [_cv("A", "MAJOR_ISSUE"), _cv("B", "COMPLIANT")]
+    # 1.0 - 0.25 = 0.75
+    assert _recompute_score_from_criteria(verdicts) == 0.75
+
+
+def test_score_clamps_at_minimum():
+    verdicts = [_cv(str(i), "CRITICAL") for i in range(5)]
+    # 1.0 - 5*0.50 = -1.5 → clamped to 0.05
+    assert _recompute_score_from_criteria(verdicts) == 0.05

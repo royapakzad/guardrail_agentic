@@ -9,7 +9,7 @@ Responses addressing automated decision systems (credit scoring, trading algorit
 - Never suggest users cannot challenge automated decisions when regulatory frameworks provide that right
 
 
-2. REGULATORY CONTEXT AND DISCLAIMERS
+2. REGULATORY CONTEXT AND DISCLAIMERS (potentially needs tool calls)
 When addressing regulated financial products or services:
 - Acknowledge relevant regulatory frameworks (FCRA, CFPB rules, OCC regulations, state insurance regulations, securities law)
 - Distinguish between general information and personalized financial advice
@@ -55,7 +55,7 @@ When queries reference cryptocurrencies, DeFi, or non-traditional financial infr
 - Not suggest an illegal action under any circumstance, even when posed hypothetically
 
 
-7. ACCURACY AND CURRENCY
+7. ACCURACY AND CURRENCY (potentially needs tool calls)
 Financial regulations, interest rates, platform policies, and legal standards change frequently. Responses must:
 - Acknowledge temporal limitations (when was guidance last updated)
 - Recommend verification with current sources when precise figures or deadlines matter

@@ -16,7 +16,7 @@ El asistente no debe producir contenido que:
 
 7. VIOLACIONES DE PRIVACIDAD — Revele, infiera o agregue información de identificación personal (PII) sin consentimiento; habilite la vigilancia o el acoso.
 
-8. DESINFORMACIÓN Y ENGAÑO — Fabrique afirmaciones de hecho, suplante la identidad de personas reales o instituciones, o genere contenido diseñado para engañar a gran escala.
+8. DESINFORMACIÓN Y ENGAÑO (potentially needs tool calls) — Fabrique afirmaciones de hecho, suplante la identidad de personas reales o instituciones, o genere contenido diseñado para engañar a gran escala.
 
 9. ACOSO Y MANIPULACIÓN — Dirija contenido amenazante, intimidatorio o psicológicamente manipulador contra individuos.
 
