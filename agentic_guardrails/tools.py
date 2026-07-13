@@ -1166,3 +1166,263 @@ _register(_ENTITY_REGISTRATION_SCHEMA, _entity_registration_handler)
 _register(_SANCTIONS_SCREEN_SCHEMA, _sanctions_screen_handler)
 
 TOOL_GROUPS["financial"] = TOOL_GROUPS["default"] + ["entity_registration", "sanctions_screen"]
+
+
+# ══ Cybersecurity / social-engineering domain tools (Issue #25) ═══════════════
+# urlscan_check: free URLScan.io search API — no auth required for search
+# (only submitting a *new* scan needs URLSCAN_API_KEY, which this tool does
+# not do). scam_guidance_lookup: a curated, embedded index — no HTTP call.
+
+_SCAM_GUIDANCE_INDEX: dict[str, dict] = {
+    "verification_code": {
+        "scam_type": "Verification-code / Google Voice scam",
+        "authority": "FTC",
+        "url": "https://consumer.ftc.gov/consumer-alerts/2021/10/google-voice-scam-how-verification-code-scam-works-how-avoid-it",
+        "pattern": (
+            "Someone asks the target to read back a one-time verification code sent to their "
+            "phone, then uses that code to take over an account or phone number in the target's name."
+        ),
+    },
+    "gift_card": {
+        "scam_type": "Gift card scam",
+        "authority": "FTC",
+        "url": "https://consumer.ftc.gov/avoiding-reporting-gift-card-scams",
+        "pattern": (
+            "Someone posing as a boss, government official, tech-support agent, or romantic "
+            "interest insists on payment via gift cards — an untraceable, non-refundable payment method."
+        ),
+    },
+    "tech_support": {
+        "scam_type": "Tech support scam",
+        "authority": "FTC",
+        "url": "https://consumer.ftc.gov/all-scams/tech-support-scams",
+        "pattern": (
+            "An unsolicited caller or pop-up claims the target's device is infected and requests "
+            "remote access, payment, or personal/financial information to 'fix' it."
+        ),
+    },
+    "social_engineering_phishing": {
+        "scam_type": "Social engineering / phishing",
+        "authority": "CISA",
+        "url": "https://www.cisa.gov/news-events/news/avoiding-social-engineering-and-phishing-attacks",
+        "pattern": (
+            "An attacker manipulates a target into divulging confidential information or performing "
+            "an action by impersonating a trusted source, typically via urgency or authority."
+        ),
+    },
+    "mfa_cisa": {
+        "scam_type": "Multi-factor authentication (MFA) guidance",
+        "authority": "CISA",
+        "url": "https://www.cisa.gov/topics/cybersecurity-best-practices/multifactor-authentication",
+        "pattern": (
+            "Official guidance on proper MFA use — relevant when a scam attempts to bypass or "
+            "exploit multi-factor authentication codes."
+        ),
+    },
+    "business_email_compromise": {
+        "scam_type": "Business email compromise (BEC)",
+        "authority": "FBI IC3",
+        "url": "https://www.ic3.gov/CrimeInfo/BEC",
+        "pattern": (
+            "An attacker impersonates an executive or vendor via email to trick an employee into "
+            "an urgent, unusual wire transfer or a change to payment instructions."
+        ),
+    },
+    "payroll_diversion": {
+        "scam_type": "Payroll diversion",
+        "authority": "FBI IC3",
+        "url": "https://www.ic3.gov/PSA/2019/PSA190910",
+        "pattern": (
+            "An attacker impersonates an employee (often via a spoofed or compromised email) to "
+            "redirect their payroll direct deposit to an account the attacker controls."
+        ),
+    },
+    "mfa_staysafe": {
+        "scam_type": "Multi-factor authentication (MFA)",
+        "authority": "Stay Safe Online",
+        "url": "https://staysafeonline.org/articles/multi-factor-authentication",
+        "pattern": "Consumer-facing best-practice guidance on enabling and using MFA.",
+    },
+    "phishing": {
+        "scam_type": "Phishing",
+        "authority": "Stay Safe Online",
+        "url": "https://staysafeonline.org/articles/phishing",
+        "pattern": (
+            "Deceptive messages (email, text, phone) designed to trick a recipient into revealing "
+            "credentials or sensitive data, or into installing malware."
+        ),
+    },
+}
+
+
+def urlscan_check(url: str) -> dict:
+    """
+    Search URLScan.io's public scan database for a URL (free, no-auth search API).
+
+    Returns the most recent existing scan's malicious/benign verdict and tags if
+    one exists. Does NOT submit a new scan and does NOT fetch/execute the URL's
+    content — this only queries URLScan's own database of prior scans.
+    """
+    url = url.strip()
+    if not url:
+        return {"url": url, "found": False, "malicious": None, "note": "Empty URL."}
+    try:
+        data = _http_json(
+            "https://urlscan.io/api/v1/search/",
+            params={"q": f"page.url:{url}"},
+        )
+    except ToolError as exc:
+        return {"url": url, "found": False, "malicious": None, "note": str(exc)}
+
+    results = data.get("results") or []
+    if not results:
+        return {
+            "url": url,
+            "found": False,
+            "malicious": None,
+            "note": (
+                "No existing URLScan.io scan found for this URL. This is absence of data, not "
+                "evidence the URL is safe."
+            ),
+        }
+
+    top = results[0]
+    task = top.get("task") or {}
+    overall = (top.get("verdicts") or {}).get("overall") or {}
+    malicious = overall.get("malicious")
+    scan_id = top.get("_id", "")
+    note = (
+        "URLScan flags this URL as MALICIOUS — treat as a confirmed phishing/malware red flag."
+        if malicious
+        else (
+            "URLScan has scanned this URL before and found no malicious verdict "
+            "(not an absolute guarantee of safety)."
+        )
+    )
+    return {
+        "url": url,
+        "found": True,
+        "malicious": malicious,
+        "score": overall.get("score"),
+        "tags": task.get("tags") or [],
+        "scan_report_url": f"https://urlscan.io/result/{scan_id}/" if scan_id else "",
+        "scan_date": task.get("time", ""),
+        "note": note,
+    }
+
+
+# Generic words that appear in nearly every entry — excluded from fallback
+# word-matching so a vague query like "scam" doesn't match everything.
+_SCAM_LOOKUP_STOPWORDS = frozenset({"scam", "scams", "type", "guidance", "attack", "attacks"})
+
+
+def scam_guidance_lookup(scam_type: str) -> dict:
+    """
+    Look up authoritative guidance (FTC/CISA/FBI IC3/Stay Safe Online) for a named
+    scam or social-engineering pattern. No HTTP call — the index is embedded;
+    call fetch_url on the returned url for the full guidance text.
+    """
+    q = scam_type.strip().lower()
+    if not q:
+        return {"query": scam_type, "matched": False, "results": [], "note": "Empty query."}
+
+    q_words = [
+        w
+        for w in q.replace("-", " ").replace("_", " ").split()
+        if len(w) > 3 and w not in _SCAM_LOOKUP_STOPWORDS
+    ]
+    matches: list[dict] = []
+    for key, entry in _SCAM_GUIDANCE_INDEX.items():
+        haystack = " ".join([key, entry["scam_type"]]).lower()
+        if q in haystack or (q_words and any(w in haystack for w in q_words)):
+            matches.append(entry)
+
+    if not matches:
+        return {
+            "query": scam_type,
+            "matched": False,
+            "results": [],
+            "note": (
+                "No indexed scam-guidance entry matched. This does not mean the pattern isn't a "
+                "scam — only that it isn't in this curated index."
+            ),
+        }
+    return {
+        "query": scam_type,
+        "matched": True,
+        "results": matches,
+        "note": "Cite the authority and URL from these results in your explanation.",
+    }
+
+
+# ── Cybersecurity handlers + schemas ──────────────────────────────────────────
+
+
+def _urlscan_check_handler(args: dict) -> dict:
+    return urlscan_check(args.get("url", ""))
+
+
+def _scam_guidance_lookup_handler(args: dict) -> dict:
+    return scam_guidance_lookup(args.get("scam_type", ""))
+
+
+_URLSCAN_CHECK_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "urlscan_check",
+        "description": (
+            "Search URLScan.io's public scan database for a URL and return its malicious/benign "
+            "verdict, tags, and scan report link if one exists. Use to check whether a URL the "
+            "assistant referenced has been flagged as phishing or malware. Only searches existing "
+            "scans — does not fetch or execute the URL's content."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to check, e.g. 'http://paypal-verify-account.tk/login'.",
+                }
+            },
+            "required": ["url"],
+        },
+    },
+}
+
+_SCAM_GUIDANCE_LOOKUP_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "scam_guidance_lookup",
+        "description": (
+            "Look up official guidance (FTC, CISA, FBI IC3, Stay Safe Online) for a named scam or "
+            "social-engineering pattern (e.g. 'gift card scam', 'business email compromise', "
+            "'verification code scam'). Returns the authority, source URL, and a one-sentence "
+            "pattern description to ground the verdict in an authoritative taxonomy. No HTTP call."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "scam_type": {
+                    "type": "string",
+                    "description": "Scam pattern or keyword, e.g. 'gift card', 'BEC', 'tech support scam'.",
+                }
+            },
+            "required": ["scam_type"],
+        },
+    },
+}
+
+# Register the cybersecurity tools (Issue #25)
+_register(_URLSCAN_CHECK_SCHEMA, _urlscan_check_handler)
+_register(_SCAM_GUIDANCE_LOOKUP_SCHEMA, _scam_guidance_lookup_handler)
+
+# Issue #25 review comment (saviaga): prioritize check_url_validity/urlscan_check
+# for domain verification; use fetch_url cautiously for suspicious links. fetch_url
+# is included here as part of the default tool set — it only ever extracts text
+# (via trafilatura/BeautifulSoup in _fetch_main_text) and never executes scripts,
+# but the agentic judge should still prefer the checks below over fetching a
+# suspected phishing URL directly.
+TOOL_GROUPS["cybersecurity"] = TOOL_GROUPS["default"] + [
+    "urlscan_check",
+    "scam_guidance_lookup",
+]
