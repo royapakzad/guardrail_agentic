@@ -34,17 +34,19 @@ import json
 import re
 import time
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Optional
 
 from any_llm import completion as _completion
 
 from llm_gateway import resolve_completion_kwargs  # PR #14
 from tools import get_tool_schemas, dispatch_tool_call, check_url_validity, check_acronym  # PR #15
-from guardrails_runner import SHARED_SEVERITY_ANCHORS, NonAgenticJudgment
+from guardrails_runner import SHARED_SEVERITY_ANCHORS, NonAgenticJudgment, run_guardrail_for_policy
+from policy_criteria import split_tagged_policy
 
 if TYPE_CHECKING:
     from scenario_logger import ScenarioLogger
+    from guardrails_runner import GuardrailAdapter
 
 
 MAX_TOOL_CALLS = 5
@@ -1340,3 +1342,153 @@ def run_agentic_guardrail(
                 "tool_call_id": _sanitize_tool_id(tc.id),
                 "content": tool_content,
             })
+
+
+# ── Explicit-tag criteria split (policy_criteria.py) ──────────────────────────
+# Alternative to criterion_needs_tools() + _merge_with_nonagentic() for policy
+# files that use the [TOOLS: REQUIRED]/[TOOLS: NOT REQUIRED] tagging
+# convention. Classification is decided by the policy author ahead of time
+# instead of guessed from the criterion's name after the fact, and the two
+# judge calls run concurrently instead of sequentially.
+
+
+def _merge_split_criteria(
+    agentic_verdicts: list[dict],
+    na_verdicts: list[dict],
+) -> tuple[list[dict], list[str]]:
+    """
+    Merge criteria verdicts for the explicit-tag split path.
+
+    Unlike _merge_with_nonagentic (which classifies by keyword-guessing on the
+    criterion name), classification here is structural: a criterion counts as
+    tool-requiring if and only if the agentic judge was actually asked about
+    it — its prompt only ever contained the tool-requiring subset, per the
+    policy author's tags — so presence in agentic_verdicts IS the
+    classification. No keyword list, no collisions.
+    """
+    ag_map: dict[str, dict] = {
+        cv.get("criterion", ""): cv for cv in agentic_verdicts if cv.get("criterion")
+    }
+    merged: list[dict] = []
+    tool_changed_for: list[str] = []
+
+    for na_cv in na_verdicts:
+        cname = na_cv.get("criterion", "")
+        if cname in ag_map:
+            ag_cv = ag_map[cname]
+            merged.append(ag_cv)
+            if na_cv.get("verdict") != ag_cv.get("verdict"):
+                tool_changed_for.append(cname)
+        else:
+            fallback = dict(na_cv)
+            fallback["tool_influenced"] = False
+            merged.append(fallback)
+
+    return merged, tool_changed_for
+
+
+def run_split_criteria_guardrail(
+    *,
+    guardrail: "GuardrailAdapter",
+    provider: str,
+    guardrail_model: str,
+    model_id: str,
+    policy_text: str,
+    rubric: str,
+    system_prompt: str,
+    user_message: str,
+    assistant_response: str,
+    max_tool_calls: int = MAX_TOOL_CALLS,
+    tool_group: str = "default",
+    verbose: bool = False,
+    logger: "Optional[ScenarioLogger]" = None,
+    policy_label: str = "",
+    scenario_language: str = "en",
+) -> tuple[NonAgenticJudgment, AgenticJudgment]:
+    """
+    Explicit-tag alternative to run_guardrail_for_policy() + run_agentic_guardrail()
+    for policy files using the [TOOLS: REQUIRED]/[TOOLS: NOT REQUIRED] tagging
+    convention (policy_criteria.py). Callers should check
+    policy_criteria.has_explicit_tool_tags(policy_text) first and use the
+    keyword-classifier path otherwise.
+
+    Runs two independent LLM calls concurrently — neither needs the other's
+    output to start, unlike the sequential keyword-classifier path where
+    run_agentic_guardrail() requires nonagentic_judgment as an input:
+
+      - non-agentic judge over the FULL policy (all criteria), unchanged from
+        the sequential path — this stays the baseline judgment needed to
+        compute tool_changed_verdict_for, and it's the cheap side already.
+      - agentic judge (with tools) over ONLY the tool-requiring criteria
+        subset — this is the expensive side, and shrinking its prompt to just
+        the criteria that actually need tools is where the real savings are.
+
+    Returns (non_agentic_judgment, merged_agentic_judgment) — same shape
+    callers already get from the sequential path, so nothing downstream
+    (CSV writing, scenario logging) needs to change.
+    """
+    tool_policy_text, _nontool_policy_text = split_tagged_policy(policy_text)
+
+    def _run_nonagentic() -> NonAgenticJudgment:
+        return run_guardrail_for_policy(
+            guardrail=guardrail,
+            policy_text=policy_text,  # full policy — the baseline judgment
+            rubric=rubric,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            assistant_response=assistant_response,
+            model_id=model_id,
+        )
+
+    def _run_agentic() -> AgenticJudgment:
+        if not tool_policy_text:
+            return AgenticJudgment(valid=None, score=None, explanation="", tool_calls_made=0)
+        return run_agentic_guardrail(
+            provider=provider,
+            guardrail_model=guardrail_model,
+            policy_text=tool_policy_text,
+            rubric=rubric,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            assistant_response=assistant_response,
+            max_tool_calls=max_tool_calls,
+            tool_group=tool_group,
+            verbose=verbose,
+            logger=logger,
+            policy_label=policy_label,
+            scenario_language=scenario_language,
+            # No nonagentic_hints/nonagentic_judgment: the prompt already only
+            # contains tool-requiring criteria (nothing left to "target"), and
+            # merging happens below — by presence, not by keyword.
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+        na_future = ex.submit(_run_nonagentic)
+        ag_future = ex.submit(_run_agentic)
+        na_judgment = na_future.result()
+        ag_judgment = ag_future.result()
+
+    if not tool_policy_text:
+        # No tool-requiring criteria at all — the non-agentic judgment over
+        # the full policy already *is* the final judgment.
+        final_agentic = replace(
+            ag_judgment,
+            valid=na_judgment.valid,
+            score=na_judgment.score,
+            explanation=na_judgment.explanation,
+            criteria_verdicts=list(na_judgment.criteria_verdicts),
+        )
+        return na_judgment, final_agentic
+
+    merged_criteria, tool_changed_for = _merge_split_criteria(
+        ag_judgment.criteria_verdicts, na_judgment.criteria_verdicts
+    )
+    merged_score = _recompute_score_from_criteria(merged_criteria)
+    final_agentic = replace(
+        ag_judgment,
+        valid=merged_score >= VALID_SCORE_THRESHOLD,
+        score=merged_score,
+        criteria_verdicts=merged_criteria,
+        tool_changed_verdict_for=tool_changed_for,
+    )
+    return na_judgment, final_agentic
