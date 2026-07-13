@@ -11,6 +11,7 @@ import agentic_runner
 from agentic_runner import (
     _merge_split_criteria,
     _recompute_score_from_criteria,
+    build_agentic_guardrail_system_prompt,
     run_split_criteria_guardrail,
     AgenticJudgment,
 )
@@ -198,3 +199,38 @@ def test_score_clamps_at_minimum():
     verdicts = [_cv(str(i), "CRITICAL") for i in range(5)]
     # 1.0 - 5*0.50 = -1.5 → clamped to 0.05
     assert _recompute_score_from_criteria(verdicts) == 0.05
+
+
+# ── build_agentic_guardrail_system_prompt ───────────────────────────────────────
+# Regression coverage for a stale-prompt bug: the prompt used to hardcode "four
+# tools" and hardcode "Factuality/Actionability" as the only tool-eligible
+# criteria — both wrong once policy_text is pre-filtered to a domain-specific
+# tool-requiring subset (run_split_criteria_guardrail).
+
+def test_prompt_lists_actual_tools_for_domain():
+    prompt = build_agentic_guardrail_system_prompt(
+        policy="1. TEST\n- desc", rubric="r", tool_group="humanitarian"
+    )
+    assert "reliefweb_situation" in prompt
+    assert "aid_org_verify" in prompt
+    assert "entity_registration" not in prompt  # financial-only tool
+
+
+def test_prompt_lists_different_tools_for_different_domain():
+    fin_prompt = build_agentic_guardrail_system_prompt(
+        policy="1. TEST\n- desc", rubric="r", tool_group="financial"
+    )
+    assert "entity_registration" in fin_prompt
+    assert "sanctions_screen" in fin_prompt
+    assert "reliefweb_situation" not in fin_prompt  # humanitarian-only tool
+
+
+def test_prompt_does_not_hardcode_factuality_actionability_scope():
+    prompt = build_agentic_guardrail_system_prompt(policy="1. TEST\n- desc", rubric="r")
+    assert "Factuality / accuracy criteria" not in prompt
+    assert "Actionability / practicality criteria" not in prompt
+
+
+def test_prompt_instructs_exact_criterion_name_copy():
+    prompt = build_agentic_guardrail_system_prompt(policy="1. TEST\n- desc", rubric="r")
+    assert "MUST be copied EXACTLY" in prompt
