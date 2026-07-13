@@ -6,7 +6,14 @@ from tools import get_tool_schemas
 
 def test_financial_group_registered():
     names = [s["function"]["name"] for s in get_tool_schemas("financial")]
-    assert names == ["search_web", "entity_registration", "sanctions_screen"]
+    assert names == [
+        "search_web",
+        "fetch_url",
+        "check_url_validity",
+        "check_acronym",
+        "entity_registration",
+        "sanctions_screen",
+    ]
 
 
 def test_entity_registration_finds_ticker(monkeypatch):

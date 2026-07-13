@@ -979,8 +979,7 @@ _register(_DISASTER_ALERT_SCHEMA, _disaster_alert_handler)
 _register(_HEALTH_ADVISORY_SCHEMA, _health_advisory_handler)
 _register(_AID_ORG_VERIFY_SCHEMA, _aid_org_verify_handler)
 
-TOOL_GROUPS["humanitarian"] = [
-    "search_web",
+TOOL_GROUPS["humanitarian"] = TOOL_GROUPS["default"] + [
     "reliefweb_situation",
     "disaster_alert",
     "health_advisory",
@@ -1166,4 +1165,4 @@ _SANCTIONS_SCREEN_SCHEMA: dict = {
 _register(_ENTITY_REGISTRATION_SCHEMA, _entity_registration_handler)
 _register(_SANCTIONS_SCREEN_SCHEMA, _sanctions_screen_handler)
 
-TOOL_GROUPS["financial"] = ["search_web", "entity_registration", "sanctions_screen"]
+TOOL_GROUPS["financial"] = TOOL_GROUPS["default"] + ["entity_registration", "sanctions_screen"]
