@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING, Optional
 from any_llm import completion as _completion
 
 from llm_gateway import resolve_completion_kwargs  # PR #14
-from tools import get_tool_schemas, dispatch_tool_call, check_url_validity, check_acronym  # PR #15
+from tools import get_tool_schemas, dispatch_tool_call, check_url_validity, check_acronym, set_domain_hint_for_group  # PR #15
 from guardrails_runner import SHARED_SEVERITY_ANCHORS, NonAgenticJudgment, run_guardrail_for_policy
 from policy_criteria import split_tagged_policy
 
@@ -874,6 +874,10 @@ def run_agentic_guardrail(
     _token_usage_per_turn: list[dict] = []
 
     _judgment_start = time.perf_counter()
+
+    # Anchor check_acronym's search queries to this domain (see tools.py) —
+    # must happen before any check_acronym call, including the pre-run below.
+    set_domain_hint_for_group(tool_group)
 
     # ── Improvements 1 + 5: pre-run URL and acronym checks in parallel ────────
     # Both sets of checks run concurrently with each other using Python threads,
