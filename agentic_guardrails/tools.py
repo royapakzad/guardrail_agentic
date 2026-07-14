@@ -108,28 +108,20 @@ def set_domain_hint_for_group(tool_group: str) -> None:
     _active_domain_hint = _DOMAIN_HINTS.get(tool_group, "")
 
 
-# ── Language → backend-native region/country codes ────────────────────────────
+# ── Language → backend-native region codes ─────────────────────────────────
 # Best-effort mapping from a BCP-47 language tag to each backend's own
 # locale-biasing parameter. Deliberately small and falls back to "no bias"
 # for anything unmapped — this is a secondary signal on top of query
 # construction, not the primary mechanism for non-English support (see
-# check_acronym's docstring for why).
+# check_acronym's docstring for why). Tavily has no such parameter and is
+# excluded — it searches all languages and infers relevance from the query
+# text alone.
 
 _LANG_TO_DDG_REGION: dict[str, str] = {
     "en": "us-en", "fr": "fr-fr", "de": "de-de", "es": "es-es", "it": "it-it",
     "pt": "pt-pt", "nl": "nl-nl", "ru": "ru-ru", "tr": "tr-tr", "pl": "pl-pl",
     "ja": "jp-jp", "ko": "kr-kr", "zh": "cn-zh", "ar": "xa-ar",
 }
-
-_LANG_TO_TAVILY_COUNTRY: dict[str, str] = {
-    # Only mapped where a language maps to one obviously-dominant country —
-    # skipped for languages spoken natively across many countries (ar, es, en)
-    # where a single country bias would do more harm than good.
-    "fa": "iran", "fr": "france", "de": "germany", "ru": "russia",
-    "tr": "turkey", "ja": "japan", "ko": "south korea", "zh": "china",
-    "pl": "poland", "nl": "netherlands", "it": "italy",
-}
-
 
 def _resolve_language(context_language: str) -> str:
     return (context_language or "").lower().split("-")[0]
@@ -251,7 +243,7 @@ def _search_searxng(query: str, max_results: int, language: str = "") -> list[di
         raise ToolError("'requests' is not installed. Run: pip install requests") from exc
     base_url = os.getenv("SEARXNG_BASE_URL", _SEARXNG_DEFAULT_URL).rstrip("/")
     # SearXNG accepts a real BCP-47-ish language code natively — no mapping
-    # table needed, unlike DuckDuckGo/Tavily's region/country parameters.
+    # table needed, unlike DuckDuckGo's region parameter.
     params = {
         "q": query,
         "format": "json",
@@ -314,18 +306,15 @@ def _tavily_client():
 def _search_tavily(query: str, max_results: int, language: str = "") -> list[dict[str, str]]:
     try:
         client = _tavily_client()
-        # Tavily's API has no "language" parameter — it infers language from
-        # the query text itself. `country` is the closest lever it exposes,
-        # used here only as a soft bias where a language maps unambiguously
-        # to one country (see _LANG_TO_TAVILY_COUNTRY); omitted otherwise
-        # rather than guessing. The query itself (built in check_acronym using
-        # the claim's own words, whatever script they're in) is what actually
-        # carries the language signal here.
-        kwargs: dict = {"max_results": max_results}
-        country = _LANG_TO_TAVILY_COUNTRY.get(_resolve_language(language))
-        if country:
-            kwargs["country"] = country
-        response = client.search(query, **kwargs)
+        # Tavily has no "language" or region-biasing parameter to set — it
+        # searches across all languages and infers relevance from the query
+        # text itself. No country/region lever is applied here: the query
+        # (built in check_acronym using the claim's own words, whatever
+        # script they're in) is what carries the language signal, and that's
+        # sufficient — a country bias would just narrow results without
+        # helping match quality. `language` is accepted for signature
+        # symmetry with the other backends but unused here.
+        response = client.search(query, max_results=max_results)
         raw = response.get("results", [])
         results = [
             {
@@ -374,10 +363,12 @@ def search_web(
 
     language: optional BCP-47 tag (e.g. "fa", "es") used to bias results
     toward that locale via whichever mechanism the active backend supports
-    (SearXNG: native language param; DuckDuckGo: region code; Tavily: country,
-    only where unambiguous). Omit for no bias — the default for the four
-    generic tools (search_web, fetch_url, check_url_validity, check_acronym's
-    old callers). check_acronym is the only current caller that passes this.
+    (SearXNG: native language param; DuckDuckGo: region code). Tavily has no
+    such lever and searches across all languages regardless — it infers
+    language/relevance from the query text itself, so this param is unused
+    there. Omit for no bias — the default for the four generic tools
+    (search_web, fetch_url, check_url_validity, check_acronym's old callers).
+    check_acronym is the only current caller that passes this.
     """
     if _active_backend == BACKEND_DUCKDUCKGO:
         return _search_duckduckgo(query, max_results, language)

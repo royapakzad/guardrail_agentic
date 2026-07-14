@@ -18,23 +18,16 @@ class _FakeTavilyClient:
         return {"results": [{"title": "t", "url": "u", "content": "c"}]}
 
 
-def test_tavily_passes_country_for_mapped_language(monkeypatch):
+def test_tavily_never_passes_country_or_language(monkeypatch):
+    # Tavily has no region/language lever — it searches all languages and
+    # infers relevance from the query text alone. No country param should
+    # ever be forced, regardless of what language is requested.
     fake_client = _FakeTavilyClient()
     monkeypatch.setattr(tools, "_tavily_client", lambda: fake_client)
 
     tools._search_tavily("query", max_results=3, language="fa")
 
-    assert fake_client.calls[0][1].get("country") == "iran"
-
-
-def test_tavily_omits_country_for_unmapped_language(monkeypatch):
-    fake_client = _FakeTavilyClient()
-    monkeypatch.setattr(tools, "_tavily_client", lambda: fake_client)
-
-    tools._search_tavily("query", max_results=3, language="es")
-
-    # Spanish spans many countries — deliberately not mapped, no guess made.
-    assert "country" not in fake_client.calls[0][1]
+    assert fake_client.calls[0][1] == {"max_results": 3}
 
 
 def test_tavily_works_with_no_language_arg(monkeypatch):
@@ -44,7 +37,7 @@ def test_tavily_works_with_no_language_arg(monkeypatch):
     results = tools._search_tavily("query", max_results=3)
 
     assert results[0]["title"] == "t"
-    assert "country" not in fake_client.calls[0][1]
+    assert fake_client.calls[0][1] == {"max_results": 3}
 
 
 # ── SearXNG ──────────────────────────────────────────────────────────────────
