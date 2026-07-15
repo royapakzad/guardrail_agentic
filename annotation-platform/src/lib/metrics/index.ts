@@ -14,3 +14,7 @@ export { computeAcronymChecks } from "./acronymChecks";
 export type { AcronymCheckSummary } from "./acronymChecks";
 export { computeLanguageFlips } from "./languageFlips";
 export type { LanguageFlipRow, LanguageFlipSummary } from "./languageFlips";
+export { computeComplianceByCriterion } from "./complianceByCriterion";
+export type { ComplianceByCriterionSummary, CriterionComplianceRow, VerdictCounts } from "./complianceByCriterion";
+export { computeCriterionFlips } from "./criterionFlips";
+export type { CriterionFlipSummary, CriterionFlipRow } from "./criterionFlips";

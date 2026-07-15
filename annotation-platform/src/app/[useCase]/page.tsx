@@ -7,6 +7,8 @@ import { DatasetPicker } from "@/lib/ui/DatasetPicker";
 import type { UseCase } from "@/lib/types";
 import {
   computeAcronymChecks,
+  computeComplianceByCriterion,
+  computeCriterionFlips,
   computeFlipRate,
   computeLanguageFlips,
   computeLatency,
@@ -14,6 +16,7 @@ import {
   computeTokenUsage,
   computeToolSelectionConsistency,
   computeToolUsage,
+  type CriterionComplianceRow,
 } from "@/lib/metrics";
 
 function isUseCase(value: string): value is UseCase {
@@ -43,6 +46,8 @@ export default async function UseCaseDashboard({
   ]);
   const scoreDeltas = computeScoreDeltas(records);
   const flipRate = computeFlipRate(records);
+  const complianceByCriterion = computeComplianceByCriterion(records);
+  const criterionFlips = computeCriterionFlips(records);
   const toolUsage = computeToolUsage(records);
   const toolSelection = computeToolSelectionConsistency(records);
   const latency = computeLatency(records);
@@ -91,17 +96,60 @@ export default async function UseCaseDashboard({
         />
       </Section>
 
-      <Section title="Verdict flip rate" note="Only counts records where the agentic pass produced criteria_verdicts to compare against — see adapter notes for historical records where it didn't.">
+      <Section
+        title="Compliance by policy criterion"
+        note="Every criterion's own compliance distribution — not just the aggregate valid/invalid score. Non-agentic (full policy, no tools) vs. agentic/final (tool-verified), per policy variant."
+      >
+        <div className="flex flex-col gap-4">
+          {complianceByCriterion.map((c) => (
+            <details key={c.label} className="rounded-md border border-slate-200 bg-white" open={complianceByCriterion.length === 1}>
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 bg-slate-50">{c.label}</summary>
+              <div className="p-2">
+                <ComplianceTable rows={c.rows} />
+              </div>
+            </details>
+          ))}
+        </div>
+      </Section>
+
+      <Section
+        title="Verdict flip rate (aggregate)"
+        note="Did *any* criterion flip for this scenario. Only counts records where the agentic pass produced criteria_verdicts to compare against. See the per-criterion breakdown below for what's actually informative — non-tool criteria can't flip by construction."
+      >
         <Table
-          columns={["Policy variant", "Comparable n", "Flipped", "Flip rate", "Top flipped criteria"]}
+          columns={["Policy variant", "Comparable n", "Flipped", "Flip rate"]}
           rows={flipRate.map((f) => [
             f.label,
             f.n,
             f.flippedCount,
             f.flipRate !== null ? `${(f.flipRate * 100).toFixed(0)}%` : "—",
-            f.topFlippedCriteria.map((c) => `${c.criterion} (${c.count})`).join(", ") || "—",
           ])}
         />
+      </Section>
+
+      <Section
+        title="Tool-requiring criteria: agentic vs. non-agentic, one at a time"
+        note='Restricted to criteria tagged "(potentially needs tool calls)" in the policy — the only criteria where a flip is possible by design. Non-tool criteria always carry the non-agentic verdict forward unchanged.'
+      >
+        <div className="flex flex-col gap-4">
+          {criterionFlips.map((c) => (
+            <details key={c.label} className="rounded-md border border-slate-200 bg-white" open={criterionFlips.length === 1}>
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 bg-slate-50">{c.label}</summary>
+              <div className="p-2">
+                <Table
+                  columns={["Criterion", "n", "Flipped", "Flip rate", "Transitions"]}
+                  rows={c.rows.map((r) => [
+                    r.criterion,
+                    r.n,
+                    r.flippedCount,
+                    r.flipRate !== null ? `${(r.flipRate * 100).toFixed(0)}%` : "—",
+                    r.transitions.map((t) => `${t.from} → ${t.to} (${t.count})`).join(", ") || "—",
+                  ])}
+                />
+              </div>
+            </details>
+          ))}
+        </div>
       </Section>
 
       <Section title="Tool usage">
@@ -244,6 +292,64 @@ function Table({ columns, rows }: { columns: string[]; rows: (string | number)[]
                   {cell}
                 </td>
               ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ComplianceTable({ rows }: { rows: CriterionComplianceRow[] }) {
+  if (rows.length === 0) {
+    return <p className="text-sm text-slate-400 px-2 py-1">No criteria_verdicts data for this policy variant.</p>;
+  }
+  return (
+    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 bg-slate-50 text-left">
+            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Criterion</th>
+            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Tool-tagged</th>
+            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap" colSpan={5}>Non-agentic</th>
+            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap" colSpan={5}>Agentic / final</th>
+          </tr>
+          <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
+            <th className="px-3 py-1"></th>
+            <th className="px-3 py-1"></th>
+            <th className="px-3 py-1 whitespace-nowrap">Compliant</th>
+            <th className="px-3 py-1 whitespace-nowrap">Minor</th>
+            <th className="px-3 py-1 whitespace-nowrap">Major</th>
+            <th className="px-3 py-1 whitespace-nowrap">Critical</th>
+            <th className="px-3 py-1 whitespace-nowrap">Rate</th>
+            <th className="px-3 py-1 whitespace-nowrap">Compliant</th>
+            <th className="px-3 py-1 whitespace-nowrap">Minor</th>
+            <th className="px-3 py-1 whitespace-nowrap">Major</th>
+            <th className="px-3 py-1 whitespace-nowrap">Critical</th>
+            <th className="px-3 py-1 whitespace-nowrap">Rate</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.criterion} className="border-b border-slate-100 last:border-0">
+              <td className="px-3 py-2 max-w-xs truncate" title={r.criterion}>{r.criterion}</td>
+              <td className="px-3 py-2">
+                {r.toolTagged ? (
+                  <span className="inline-block rounded-full bg-sky-100 text-sky-800 px-2 py-0.5 text-xs font-medium">tool</span>
+                ) : (
+                  <span className="text-slate-300 text-xs">—</span>
+                )}
+              </td>
+              <td className="px-3 py-2 tabular-nums">{r.nonagentic.COMPLIANT}</td>
+              <td className="px-3 py-2 tabular-nums">{r.nonagentic.MINOR_ISSUE}</td>
+              <td className="px-3 py-2 tabular-nums">{r.nonagentic.MAJOR_ISSUE}</td>
+              <td className="px-3 py-2 tabular-nums">{r.nonagentic.CRITICAL}</td>
+              <td className="px-3 py-2 tabular-nums">{r.nonagenticComplianceRate !== null ? `${(r.nonagenticComplianceRate * 100).toFixed(0)}%` : "—"}</td>
+              <td className="px-3 py-2 tabular-nums">{r.agentic.COMPLIANT}</td>
+              <td className="px-3 py-2 tabular-nums">{r.agentic.MINOR_ISSUE}</td>
+              <td className="px-3 py-2 tabular-nums">{r.agentic.MAJOR_ISSUE}</td>
+              <td className="px-3 py-2 tabular-nums">{r.agentic.CRITICAL}</td>
+              <td className="px-3 py-2 tabular-nums">{r.agenticComplianceRate !== null ? `${(r.agenticComplianceRate * 100).toFixed(0)}%` : "—"}</td>
             </tr>
           ))}
         </tbody>
