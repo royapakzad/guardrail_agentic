@@ -29,7 +29,17 @@ data/.DS_Store
 outputs/
 Final_outputs/
 analysis_improvemnets/
+config/
+data/
 
 # ── Docs (generated, not tracked) ────────────────────────────────────────────
 IMPROVEMENTS.md
 ANALYSIS.md
+README.md
+
+# ── annotation-platform: curated data + its own docs ARE tracked ─────────────
+# (the broad data/ and README.md rules above are unanchored and would
+# otherwise also catch these nested paths)
+!annotation-platform/data/
+!annotation-platform/data/**
+!annotation-platform/README.md
