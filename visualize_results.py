@@ -465,23 +465,38 @@ with tab_detail:
     tool_log = ensure_list(row.get(f"{label}_agentic_tool_call_log", []))
     url_checks = ensure_list(row.get(f"{label}_agentic_url_checks", []))
 
+    _TOOL_ICONS = {
+        "search_web": "🔎",
+        "fetch_url": "📄",
+        "check_url_validity": "🔗",
+        "check_acronym": "🔤",
+        "reliefweb_situation": "🌍",
+        "disaster_alert": "🌪️",
+        "health_advisory": "🩺",
+        "aid_org_verify": "🏷️",
+        "entity_registration": "🏢",
+        "sanctions_screen": "🚫",
+        "urlscan_check": "🕵️",
+        "scam_guidance_lookup": "📋",
+    }
+
     if tool_log:
         with st.expander(f"🔧 Tool Call Log ({len(tool_log)} calls)", expanded=True):
             for i, call in enumerate(tool_log, 1):
                 tool_name = call.get("tool", "?")
                 inp = call.get("input", {})
                 preview = call.get("output_preview", "")
+                check_purpose = call.get("check_purpose", "")
+                timestamp = call.get("timestamp", "")
+                call_number = call.get("call_number", i)
+                icon = _TOOL_ICONS.get(tool_name, "🔧")
 
-                if tool_name == "search_web":
-                    icon = "🔎"
-                elif tool_name == "fetch_url":
-                    icon = "📄"
-                elif tool_name == "check_url_validity":
-                    icon = "🔗"
-                else:
-                    icon = "🔧"
-
-                st.markdown(f"**{icon} Call {i}: `{tool_name}`**")
+                header = f"**{icon} Call {call_number}: `{tool_name}`**"
+                if timestamp:
+                    header += f"  <span style='color:#888;font-size:0.8em'>{timestamp}</span>"
+                st.markdown(header, unsafe_allow_html=True)
+                if check_purpose:
+                    st.caption(f"Check: {check_purpose}")
 
                 tc1, tc2 = st.columns(2)
 

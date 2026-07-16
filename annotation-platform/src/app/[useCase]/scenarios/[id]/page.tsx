@@ -92,7 +92,20 @@ export default async function ScenarioDetailPage({
           <div className="flex flex-col gap-2">
             {variant.agentic.toolCallLog.map((call, i) => (
               <div key={i} className="rounded border border-slate-200 bg-white p-3 text-xs">
-                <div className="font-mono font-medium text-slate-800">{call.tool}</div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-mono font-medium text-slate-800">
+                    {call.call_number ? `#${call.call_number} ` : ""}
+                    {call.tool}
+                  </div>
+                  {call.timestamp && (
+                    <span className="text-slate-400 shrink-0">
+                      {new Date(call.timestamp).toLocaleTimeString()}
+                    </span>
+                  )}
+                </div>
+                {call.check_purpose && (
+                  <div className="mt-1 text-slate-500 italic">{call.check_purpose}</div>
+                )}
                 {call.input && <div className="mt-1 text-slate-600 font-mono break-words">{JSON.stringify(call.input)}</div>}
                 {call.output_preview && (
                   <div className="mt-1 text-slate-500 font-mono break-words">{String(call.output_preview).slice(0, 300)}</div>
@@ -183,9 +196,23 @@ function JudgePanel({ title, pass, agentic }: { title: string; pass: JudgePass |
       {pass.criteriaVerdicts.length > 0 && (
         <div className="flex flex-col gap-1">
           {pass.criteriaVerdicts.map((c, i) => (
-            <div key={i} className="flex items-center justify-between gap-2 text-xs">
-              <span className="text-slate-700">{c.criterion}</span>
-              <VerdictBadge verdict={c.verdict} />
+            <div key={i} className="flex flex-col gap-0.5 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-700">{c.criterion}</span>
+                <VerdictBadge verdict={c.verdict} />
+              </div>
+              {Array.isArray(c.tools_used) && c.tools_used.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {c.tools_used.map((t, j) => (
+                    <span
+                      key={j}
+                      className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600"
+                    >
+                      {String(t)}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>

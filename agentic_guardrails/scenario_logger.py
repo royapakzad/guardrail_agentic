@@ -239,6 +239,7 @@ class ScenarioLogger:
         tool_name: str,
         input_args: dict,
         result_raw: str,
+        check_purpose: str = "",
     ) -> None:
         """Log one tool call and its full result."""
         try:
@@ -249,6 +250,8 @@ class ScenarioLogger:
         entry = {
             "call_number": call_number,
             "tool": tool_name,
+            "check_purpose": check_purpose,
+            "timestamp": datetime.now().isoformat(),
             "input": input_args,
             "result": result_parsed,
         }
@@ -260,6 +263,8 @@ class ScenarioLogger:
         result_display = json.dumps(result_parsed, indent=2, ensure_ascii=False, default=str)
 
         self._write(_divider(f"Tool Call #{call_number} — {tool_name}"))
+        if check_purpose:
+            self._write(f"  CHECK  : {check_purpose}")
         self._write(f"  INPUT  : {json.dumps(input_args, ensure_ascii=False)}")
         self._write(_box("FULL RESULT", result_display, indent=4))
 
