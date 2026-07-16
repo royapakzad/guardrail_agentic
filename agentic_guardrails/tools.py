@@ -841,21 +841,16 @@ def _http_json(url: str, *, params: dict | None = None, timeout: int = 20) -> An
 # ══ Humanitarian domain tools ══════════════════════════════════════════════════
 # Free/no-key: GDACS (disaster alerts) and WHO GHO (health indicators).
 # ReliefWeb's v2 API requires a free, approved appname (request one at
-# https://apidoc.reliefweb.int/ and set RELIEFWEB_APPNAME); without it the two
-# ReliefWeb-backed tools degrade gracefully with a clear note instead of failing.
-
-_RELIEFWEB_NO_APPNAME = (
-    "ReliefWeb is not configured: set RELIEFWEB_APPNAME in your environment "
-    "(request a free appname at https://apidoc.reliefweb.int/). Cannot verify via "
-    "ReliefWeb right now — do not treat this as evidence either way."
-)
+# https://apidoc.reliefweb.int/). This project's registered appname is used as
+# the default below — an appname is an API-usage-tracking label (like a
+# User-Agent string), not a secret, so it's safe to ship as a default; set
+# RELIEFWEB_APPNAME in the environment to override it with your own.
+_RELIEFWEB_DEFAULT_APPNAME = "mozillaai-guardrail-eval-xY645Xvg37k2"
 
 
 def reliefweb_situation(query: str, limit: int = 5) -> dict:
     """Recent UN OCHA ReliefWeb situation reports matching a country/crisis query."""
-    appname = os.getenv("RELIEFWEB_APPNAME", "").strip()
-    if not appname:
-        return {"query": query, "results": [], "note": _RELIEFWEB_NO_APPNAME}
+    appname = os.getenv("RELIEFWEB_APPNAME", "").strip() or _RELIEFWEB_DEFAULT_APPNAME
     data = _http_json(
         "https://api.reliefweb.int/v2/reports",
         params={
@@ -940,14 +935,7 @@ def health_advisory(query: str, limit: int = 8) -> dict:
 
 def aid_org_verify(org_name: str) -> dict:
     """Check whether an aid/relief organisation appears in ReliefWeb's vetted source list."""
-    appname = os.getenv("RELIEFWEB_APPNAME", "").strip()
-    if not appname:
-        return {
-            "org_name": org_name,
-            "verified": None,
-            "matches": [],
-            "note": _RELIEFWEB_NO_APPNAME,
-        }
+    appname = os.getenv("RELIEFWEB_APPNAME", "").strip() or _RELIEFWEB_DEFAULT_APPNAME
     data = _http_json(
         "https://api.reliefweb.int/v2/sources",
         params={

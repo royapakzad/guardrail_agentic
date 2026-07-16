@@ -61,11 +61,30 @@ def test_health_advisory_parses_who_indicators(monkeypatch):
     assert result["who_indicators"] == [{"code": "C1", "name": "Cholera deaths"}]
 
 
-def test_reliefweb_without_appname_degrades_gracefully(monkeypatch):
+def test_reliefweb_falls_back_to_default_appname_when_unset(monkeypatch):
     monkeypatch.delenv("RELIEFWEB_APPNAME", raising=False)
-    result = tools.reliefweb_situation("Sudan")
-    assert result["results"] == []
-    assert "RELIEFWEB_APPNAME" in result["note"]
+    captured = {}
+
+    def fake_http_json(url, params=None, **kwargs):
+        captured["appname"] = params.get("appname")
+        return {"data": []}
+
+    monkeypatch.setattr(tools, "_http_json", fake_http_json)
+    tools.reliefweb_situation("Sudan")
+    assert captured["appname"] == tools._RELIEFWEB_DEFAULT_APPNAME
+
+
+def test_reliefweb_uses_env_appname_when_set(monkeypatch):
+    monkeypatch.setenv("RELIEFWEB_APPNAME", "my-own-appname")
+    captured = {}
+
+    def fake_http_json(url, params=None, **kwargs):
+        captured["appname"] = params.get("appname")
+        return {"data": []}
+
+    monkeypatch.setattr(tools, "_http_json", fake_http_json)
+    tools.reliefweb_situation("Sudan")
+    assert captured["appname"] == "my-own-appname"
 
 
 def test_reliefweb_situation_parses_reports(monkeypatch):
