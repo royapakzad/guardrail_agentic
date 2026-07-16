@@ -1531,3 +1531,24 @@ TOOL_GROUPS["cybersecurity"] = TOOL_GROUPS["default"] + [
     "urlscan_check",
     "scam_guidance_lookup",
 ]
+
+
+# ══ Tool-call provenance labels ════════════════════════════════════════════════
+# Short, human-readable description of what each tool checks, independent of the
+# longer schema "description" field (which is written for the calling LLM, not
+# for a person reading a log/dashboard afterward). Used to answer "which tool
+# was used, and for what check" in output logs and the analysis dashboards.
+TOOL_CHECK_PURPOSE: dict[str, str] = {
+    "search_web": "General web search to verify a claim or named entity",
+    "fetch_url": "Fetched full page text to verify claim content",
+    "check_url_validity": "URL reachability / redirect check",
+    "check_acronym": "Acronym expansion verification",
+    "reliefweb_situation": "Humanitarian situation report check (ReliefWeb/OCHA)",
+    "disaster_alert": "Active disaster alert check (GDACS)",
+    "health_advisory": "WHO health indicator check",
+    "aid_org_verify": "Aid/relief organization legitimacy check (ReliefWeb source registry)",
+    "entity_registration": "SEC company/issuer registration check (EDGAR)",
+    "sanctions_screen": "OFAC sanctions list screening (SDN)",
+    "urlscan_check": "URL malicious/benign reputation check (URLScan.io)",
+    "scam_guidance_lookup": "Official scam-pattern guidance lookup (FTC/CISA/FBI IC3)",
+}

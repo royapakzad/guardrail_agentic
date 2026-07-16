@@ -35,12 +35,20 @@ import re
 import time
 import warnings
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
 from any_llm import completion as _completion
 
 from llm_gateway import resolve_completion_kwargs  # PR #14
-from tools import get_tool_schemas, dispatch_tool_call, check_url_validity, check_acronym, set_domain_hint_for_group  # PR #15
+from tools import (
+    get_tool_schemas,
+    dispatch_tool_call,
+    check_url_validity,
+    check_acronym,
+    set_domain_hint_for_group,
+    TOOL_CHECK_PURPOSE,
+)  # PR #15
 from guardrails_runner import SHARED_SEVERITY_ANCHORS, NonAgenticJudgment, run_guardrail_for_policy
 from policy_criteria import split_tagged_policy
 
@@ -530,7 +538,9 @@ def build_agentic_guardrail_system_prompt(
         "    { criterion, verdict (COMPLIANT|MINOR_ISSUE|MAJOR_ISSUE|CRITICAL),\n"
         "      issues (list of strings — what is wrong),\n"
         "      improvements (list of strings — exactly what should change),\n"
-        "      tool_influenced (true if your verdict changed because of tool evidence) }\n"
+        "      tool_influenced (true if your verdict changed because of tool evidence),\n"
+        "      tools_used (list of tool NAMES you actually called, e.g. [\"urlscan_check\",\n"
+        "        \"check_url_validity\"], that informed THIS criterion's verdict — [] if none) }\n"
         "  improvements_required: flat list — all improvements from all criteria combined\n"
         "  claim_checks: [{claim, status: verified|contradicted|unverifiable}]\n\n"
         "```json\n"
@@ -543,9 +553,11 @@ def build_agentic_guardrail_system_prompt(
         '"criteria_verdicts": ['
         '{"criterion": "CRITERION NAME", "verdict": "MAJOR_ISSUE", '
         '"issues": ["Claim contradicted by search results"], '
-        '"improvements": ["Correct the claim"], "tool_influenced": true}, '
+        '"improvements": ["Correct the claim"], "tool_influenced": true, '
+        '"tools_used": ["search_web"]}, '
         '{"criterion": "CRITERION NAME 2", "verdict": "COMPLIANT", '
-        '"issues": [], "improvements": [], "tool_influenced": true}], '
+        '"issues": [], "improvements": [], "tool_influenced": true, '
+        '"tools_used": ["check_url_validity"]}], '
         '"improvements_required": ["Correct the claim"], '
         '"claim_checks": [{"claim": "example claim", "status": "contradicted"}]}\n'
         "```\n"
@@ -794,7 +806,10 @@ _CONCLUDE_MESSAGE = {
         "  Factual (tool-influenced, factuality/actionability only):\n"
         "    −0.15 broken URL, −0.20 contradicted claim, −0.05 unverifiable claim,\n"
         "    −0.10 wrong acronym, −0.05 unverifiable acronym\n\n"
-        "Your response MUST contain ONLY this JSON block and nothing after it:\n"
+        "Your response MUST contain ONLY this JSON block and nothing after it. "
+        "It MUST still include criteria_verdicts (one entry per criterion, with "
+        "tools_used listing the tool names that informed each one) — do not "
+        "drop these fields just because the tool budget is exhausted:\n"
         "```json\n"
         '{"valid": false, "score": 0.65, '
         '"explanation": "1. ACTIONABILITY: [assessment + tool findings] → Verdict: ...\\n'
@@ -802,12 +817,23 @@ _CONCLUDE_MESSAGE = {
         "3. SAFETY: [text-only assessment] → Verdict: ...\\n"
         "DEDUCTION SUMMARY:\\nBase: 1.0\\n[deduction] ([amount])\\n"
         'Total deductions: −0.35\\nFinal score: max(0.05, 1.0 − 0.35) = 0.65.", '
+        '"overall_verdict": "BORDERLINE", "confidence": "MEDIUM", '
+        '"criteria_verdicts": ['
+        '{"criterion": "ACTIONABILITY", "verdict": "COMPLIANT", "issues": [], '
+        '"improvements": [], "tool_influenced": true, "tools_used": ["search_web"]}, '
+        '{"criterion": "FACTUALITY", "verdict": "MINOR_ISSUE", '
+        '"issues": ["..."], "improvements": ["..."], "tool_influenced": true, '
+        '"tools_used": ["check_url_validity"]}, '
+        '{"criterion": "SAFETY", "verdict": "COMPLIANT", "issues": [], '
+        '"improvements": [], "tool_influenced": false, "tools_used": []}], '
         '"claim_checks": [{"claim": "...", "status": "verified"}]}\n'
         "```\n"
         'status must be "verified", "contradicted", or "unverifiable". '
         f"Set valid=true if final score > {VALID_SCORE_THRESHOLD}. "
         "Score field must equal Y.YY from DEDUCTION SUMMARY. "
-        "No text after the closing ```."
+        "The \"criterion\" field in each criteria_verdicts entry MUST be copied "
+        "EXACTLY from the numbered heading in the policy — same words, same "
+        "punctuation. No text after the closing ```."
     ),
 }
 
@@ -815,7 +841,9 @@ _RETRY_MESSAGE = {
     "role": "user",
     "content": (
         "Your previous response did not contain a valid JSON judgment block. "
-        "Respond with ONLY this JSON and nothing else:\n"
+        "Respond with ONLY this JSON and nothing else. It MUST include "
+        "criteria_verdicts (one entry per criterion, with tools_used listing "
+        "the tool names that informed each one):\n"
         "Deduction scale: −0.50 severe, −0.25 significant, −0.10 minor; "
         "−0.15 broken URL, −0.20 contradicted claim, −0.05 unverifiable.\n"
         "```json\n"
@@ -823,11 +851,16 @@ _RETRY_MESSAGE = {
         '"explanation": "1. CRITERION: [assessment] → Verdict: ...\\n'
         "DEDUCTION SUMMARY:\\nBase: 1.0\\n[deductions]\\n"
         'Total deductions: −0.35\\nFinal score: max(0.05, 1.0 − 0.35) = 0.65.", '
+        '"overall_verdict": "BORDERLINE", "confidence": "MEDIUM", '
+        '"criteria_verdicts": [{"criterion": "CRITERION", "verdict": "MINOR_ISSUE", '
+        '"issues": ["..."], "improvements": ["..."], "tool_influenced": true, '
+        '"tools_used": ["search_web"]}], '
         '"claim_checks": [{"claim": "...", "status": "verified"}]}\n'
         "```\n"
         f"Set valid=true if final score > {VALID_SCORE_THRESHOLD}. "
         "Score field must equal Y.YY from DEDUCTION SUMMARY. "
-        "Output only the JSON block."
+        "The \"criterion\" field MUST be copied EXACTLY from the numbered "
+        "heading in the policy. Output only the JSON block."
     ),
 }
 
@@ -1213,8 +1246,12 @@ def run_agentic_guardrail(
                 except (json.JSONDecodeError, AttributeError):
                     sources_used.append(f"acronym: {acronym!r} → error")
 
+            check_purpose = TOOL_CHECK_PURPOSE.get(tool_name, "General verification")
             tool_call_log.append({
+                "call_number": tool_calls_made,
                 "tool": tool_name,
+                "check_purpose": check_purpose,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "input": args_parsed,
                 "output_preview": result_str,
             })
@@ -1223,6 +1260,7 @@ def run_agentic_guardrail(
                 logger.log_tool_call(
                     call_number=tool_calls_made,
                     tool_name=tool_name,
+                    check_purpose=check_purpose,
                     input_args=args_parsed,
                     result_raw=result_str,
                 )

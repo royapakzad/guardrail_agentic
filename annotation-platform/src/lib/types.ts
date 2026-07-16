@@ -6,11 +6,20 @@ export type CriterionVerdict = {
   issues?: string[];
   improvements?: string[];
   tool_influenced?: boolean;
+  /** Tool names the judge reports it called to evaluate this specific criterion. */
+  tools_used?: string[];
   [key: string]: unknown;
 };
 
 export type ToolCall = {
   tool: string;
+  /** 1-indexed position in this judge's tool-call sequence. */
+  call_number?: number;
+  /** ISO 8601 UTC timestamp of when the call was made. */
+  timestamp?: string;
+  /** Short human-readable description of what this tool checks, e.g.
+   * "URL malicious/benign reputation check (URLScan.io)". */
+  check_purpose?: string;
   input?: Record<string, unknown>;
   output_preview?: string;
   [key: string]: unknown;
