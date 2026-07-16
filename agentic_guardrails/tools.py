@@ -1366,9 +1366,15 @@ def urlscan_check(url: str) -> dict:
     if not url:
         return {"url": url, "found": False, "malicious": None, "note": "Empty URL."}
     try:
+        # URLScan's `q` param is a Lucene-style query. The raw `:` and `/` in a
+        # URL are Lucene syntax characters (field separator / regex delimiter),
+        # so the term must be quoted for exact-match lookup, per URLScan's own
+        # search docs (https://urlscan.io/docs/search/) — an unquoted
+        # `page.url:{url}` is rejected with 400 Bad Request (Issue #38).
+        escaped_url = url.replace('"', '\\"')
         data = _http_json(
             "https://urlscan.io/api/v1/search/",
-            params={"q": f"page.url:{url}"},
+            params={"q": f'page.url:"{escaped_url}"'},
         )
     except ToolError as exc:
         return {"url": url, "found": False, "malicious": None, "note": str(exc)}

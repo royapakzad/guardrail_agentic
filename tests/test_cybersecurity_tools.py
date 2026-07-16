@@ -34,6 +34,21 @@ def test_urlscan_check_flags_malicious(monkeypatch):
     assert "phishing" in result["tags"]
 
 
+def test_urlscan_check_quotes_url_in_lucene_query(monkeypatch):
+    """Regression test for Issue #38: an unquoted `page.url:{url}` term is
+    invalid Lucene syntax once the URL's `:` and `/` are in play, and
+    URLScan rejects it with 400. The term must be a quoted phrase."""
+    captured = {}
+
+    def fake_http_json(url, *, params=None, timeout=20):
+        captured["params"] = params
+        return {"results": []}
+
+    monkeypatch.setattr(tools, "_http_json", fake_http_json)
+    tools.urlscan_check("http://paypal-verify-account.tk/login")
+    assert captured["params"]["q"] == 'page.url:"http://paypal-verify-account.tk/login"'
+
+
 def test_urlscan_check_no_scan_found(monkeypatch):
     monkeypatch.setattr(tools, "_http_json", lambda *a, **k: {"results": []})
     result = tools.urlscan_check("http://example.com")
