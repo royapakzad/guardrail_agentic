@@ -35,6 +35,19 @@ import os
 import warnings
 from typing import Any
 
+# Issue #50: judge calls previously never pinned a sampling temperature, so
+# every guardrail judgment (agentic and non-agentic) sampled at whatever the
+# provider's default happens to be — a real, measurable source of run-to-run
+# scoring variance even with byte-identical input (confirmed by a 6x repeated
+# -judge diagnostic: 2-3 of 9 policy criteria flipped verdict across runs with
+# temperature unset). Pinning judge calls to a low temperature reduces this.
+#
+# This constant is used ONLY for guardrail judge calls (agentic_runner.py,
+# guardrails_runner.py) — NOT for assistant-response generation, which
+# intentionally uses each provider's default so the assistant path continues
+# to reflect realistic response variance.
+JUDGE_TEMPERATURE: float = 0.0
+
 
 def _patch_otari_provider() -> None:
     """
