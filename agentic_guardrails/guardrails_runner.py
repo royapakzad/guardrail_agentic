@@ -222,7 +222,7 @@ def _run_generative_judge(
     """
     from any_llm import completion as _llm_completion
 
-    from llm_gateway import resolve_completion_kwargs
+    from llm_gateway import resolve_completion_kwargs, JUDGE_TEMPERATURE  # Issue #50
 
     if ":" in model_id:
         llm_provider, llm_model = model_id.split(":", 1)
@@ -242,10 +242,21 @@ def _run_generative_judge(
             },
             {"role": "user", "content": eval_text},
         ],
+        "temperature": JUDGE_TEMPERATURE,
     }
     call_kwargs.update(gateway_overrides)
 
-    resp = _llm_completion(**call_kwargs)
+    try:
+        resp = _llm_completion(**call_kwargs)
+    except Exception as exc:
+        # Some models (e.g. OpenAI's reasoning-tier models) reject any
+        # explicit temperature value and only accept their default — retry
+        # once without it rather than failing the whole judgment (Issue #50).
+        if "temperature" in str(exc).lower():
+            call_kwargs.pop("temperature", None)
+            resp = _llm_completion(**call_kwargs)
+        else:
+            raise
     text = resp.choices[0].message.content or ""
     data = _extract_first_json_object(text)
 

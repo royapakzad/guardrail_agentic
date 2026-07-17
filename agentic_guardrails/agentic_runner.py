@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING, Optional
 
 from any_llm import completion as _completion
 
-from llm_gateway import resolve_completion_kwargs  # PR #14
+from llm_gateway import resolve_completion_kwargs, JUDGE_TEMPERATURE  # PR #14; Issue #50
 from tools import (
     get_tool_schemas,
     dispatch_tool_call,
@@ -65,14 +65,22 @@ _RATE_LIMIT_BASE_WAIT_S = 60  # doubles each attempt: 60 → 120 → 240
 
 
 def _completion_with_retry(**kwargs):
-    """Wrapper around completion() that retries on 429 rate-limit errors."""
+    """
+    Wrapper around completion() that retries on 429 rate-limit errors, and
+    strips an unsupported `temperature` kwarg for models that reject any
+    explicit value (e.g. OpenAI's reasoning-tier models only accept their
+    default temperature and error on other values) — Issue #50.
+    """
     for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
         try:
             return _completion(**kwargs)
         except Exception as exc:
+            msg = str(exc).lower()
+            if "temperature" in kwargs and "temperature" in msg:
+                kwargs = {k: v for k, v in kwargs.items() if k != "temperature"}
+                continue
             if attempt == _RATE_LIMIT_MAX_RETRIES:
                 raise
-            msg = str(exc).lower()
             if "429" in msg or "rate_limit" in msg or "rate limit" in msg:
                 wait_s = _RATE_LIMIT_BASE_WAIT_S * (2 ** attempt)
                 warnings.warn(
@@ -982,6 +990,7 @@ def run_agentic_guardrail(
             messages=messages,
         )
         call_kwargs.update(gateway_overrides)
+        call_kwargs["temperature"] = JUDGE_TEMPERATURE  # Issue #50
         if tool_choice != "none":
             call_kwargs["tools"] = get_tool_schemas(tool_group)  # PR #15
             call_kwargs["tool_choice"] = tool_choice
@@ -1032,6 +1041,7 @@ def run_agentic_guardrail(
                     provider=provider.lower(),
                     model=guardrail_model,
                     messages=messages,
+                    temperature=JUDGE_TEMPERATURE,  # Issue #50
                 )
                 try:
                     retry_resp = _completion_with_retry(**retry_kwargs)
