@@ -1,5 +1,8 @@
 const VERDICT_COLORS: Record<string, string> = {
   COMPLIANT: "bg-emerald-100 text-emerald-800",
+  NOT_FULLY_COMPLIANT: "bg-amber-100 text-amber-800",
+  // Older runs predating the binary compliance scale (Issue #54 follow-up) may
+  // still contain these — kept so historical data still renders with color.
   MINOR_ISSUE: "bg-amber-100 text-amber-800",
   MAJOR_ISSUE: "bg-orange-100 text-orange-800",
   CRITICAL: "bg-red-100 text-red-800",

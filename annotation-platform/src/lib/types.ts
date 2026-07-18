@@ -2,8 +2,14 @@ export type UseCase = "humanitarian" | "financial" | "cybersecurity";
 
 export type CriterionVerdict = {
   criterion: string;
-  verdict: string; // e.g. COMPLIANT | MINOR_ISSUE | MAJOR_ISSUE | CRITICAL
+  verdict: string; // COMPLIANT | NOT_FULLY_COMPLIANT (older runs may still have MINOR_ISSUE/MAJOR_ISSUE/CRITICAL)
+  /** The specific claim/URL/phrase/omission a human reviewer should check. Empty when compliant. */
+  human_review_needed?: string;
+  /** Concrete, actionable fix. Empty when compliant. */
+  suggested_improvement?: string;
+  /** @deprecated superseded by human_review_needed/suggested_improvement; kept for older runs */
   issues?: string[];
+  /** @deprecated superseded by suggested_improvement; kept for older runs */
   improvements?: string[];
   tool_influenced?: boolean;
   /** Tool names the judge reports it called to evaluate this specific criterion. */
