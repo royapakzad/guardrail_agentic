@@ -98,3 +98,90 @@ def test_build_reliability_report():
     text = report.format_report()
     assert "agentic" in text
     assert "UNSTABLE" in text
+
+
+def test_collapse_runs_full_is_identity():
+    runs = [{"c1": "COMPLIANT"}, {"c1": "MAJOR_ISSUE"}, {"c1": "CRITICAL"}]
+    assert rm.collapse_runs(runs, "full") == runs
+
+
+def test_collapse_runs_severity_tier_merges_major_and_critical_only():
+    runs = [{"c1": "COMPLIANT"}, {"c1": "MINOR_ISSUE"}, {"c1": "MAJOR_ISSUE"}, {"c1": "CRITICAL"}]
+    collapsed = rm.collapse_runs(runs, "severity_tier")
+    assert collapsed == [{"c1": "COMPLIANT"}, {"c1": "MINOR"}, {"c1": "VIOLATION"}, {"c1": "VIOLATION"}]
+
+
+def test_collapse_runs_harm_based():
+    runs = [{"c1": "COMPLIANT"}, {"c1": "MINOR_ISSUE"}, {"c1": "MAJOR_ISSUE"}, {"c1": "CRITICAL"}]
+    collapsed = rm.collapse_runs(runs, "harm_based")
+    assert collapsed == [{"c1": "COMPLIANT"}, {"c1": "COMPLIANT"}, {"c1": "VIOLATION"}, {"c1": "VIOLATION"}]
+
+
+def test_collapse_runs_unknown_scheme_raises():
+    import pytest
+
+    with pytest.raises(ValueError):
+        rm.collapse_runs([{"c1": "COMPLIANT"}], "not-a-real-scheme")
+
+
+def test_compare_collapse_schemes_matches_empirical_finding():
+    """Regression test for Issue #54's core finding: every observed flip so
+    far was COMPLIANT <-> MINOR_ISSUE. severity_tier (merges only MAJOR_ISSUE/
+    CRITICAL) should NOT remove that instability, since it never touches the
+    COMPLIANT/MINOR_ISSUE boundary. harm_based (merges COMPLIANT/MINOR_ISSUE)
+    SHOULD remove it, because it merges away the exact boundary that was
+    flip-flopping."""
+    runs = [
+        {"c1": "COMPLIANT", "c2": "COMPLIANT"},
+        {"c1": "MINOR_ISSUE", "c2": "COMPLIANT"},
+        {"c1": "COMPLIANT", "c2": "COMPLIANT"},
+    ]
+    comparison = rm.compare_collapse_schemes(runs, label="test")
+    assert comparison["full"]["n_unstable_criteria"] == 1
+    assert comparison["severity_tier"]["n_unstable_criteria"] == 1  # unchanged -- flip wasn't in MAJOR/CRITICAL
+    assert comparison["harm_based"]["n_unstable_criteria"] == 0  # eliminated by merging the flipping boundary
+
+
+def test_compare_tool_call_outputs_detects_identical_and_changed_evidence():
+    runs_tool_logs = [
+        [
+            {"tool": "urlscan_check", "input": {"url": "https://x.example"}, "output_preview": "A"},
+            {"tool": "aid_org_verify", "input": {"org_name": "Red Cross"}, "output_preview": "verified"},
+        ],
+        [
+            {"tool": "urlscan_check", "input": {"url": "https://x.example"}, "output_preview": "A"},
+            {"tool": "aid_org_verify", "input": {"org_name": "Red Cross"}, "output_preview": "verified"},
+        ],
+        [
+            {"tool": "urlscan_check", "input": {"url": "https://x.example"}, "output_preview": "B"},
+            # aid_org_verify not called this run -- only 2 calls total, still >= 2, still compared
+        ],
+    ]
+    report = rm.compare_tool_call_outputs(runs_tool_logs)
+    by_tool = {e["tool"]: e for e in report}
+
+    assert by_tool["urlscan_check"]["n_calls"] == 3
+    assert by_tool["urlscan_check"]["identical_output"] is False
+    assert by_tool["urlscan_check"]["distinct_outputs"] == 2
+
+    assert by_tool["aid_org_verify"]["n_calls"] == 2
+    assert by_tool["aid_org_verify"]["identical_output"] is True
+    assert by_tool["aid_org_verify"]["distinct_outputs"] == 1
+
+
+def test_compare_tool_call_outputs_excludes_single_calls():
+    runs_tool_logs = [
+        [{"tool": "search_web", "input": {"query": "only once"}, "output_preview": "x"}],
+        [],
+    ]
+    assert rm.compare_tool_call_outputs(runs_tool_logs) == []
+
+
+def test_format_evidence_reproducibility_report_flags_changed_evidence():
+    entries = [
+        {"tool": "urlscan_check", "input": {"url": "https://x"}, "n_calls": 3, "identical_output": False, "distinct_outputs": 2}
+    ]
+    text = rm.format_evidence_reproducibility_report(entries)
+    assert "EVIDENCE ITSELF CHANGED" in text
+
+    assert "nothing to compare" in rm.format_evidence_reproducibility_report([])

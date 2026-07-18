@@ -213,6 +213,18 @@ function JudgePanel({ title, pass, agentic }: { title: string; pass: JudgePass |
                   ))}
                 </div>
               )}
+              {typeof c.human_review_needed === "string" && c.human_review_needed && (
+                <div className="text-amber-800">
+                  <span className="font-medium">Review: </span>
+                  {c.human_review_needed}
+                </div>
+              )}
+              {typeof c.suggested_improvement === "string" && c.suggested_improvement && (
+                <div className="text-slate-600">
+                  <span className="font-medium">Suggested fix: </span>
+                  {c.suggested_improvement}
+                </div>
+              )}
             </div>
           ))}
         </div>

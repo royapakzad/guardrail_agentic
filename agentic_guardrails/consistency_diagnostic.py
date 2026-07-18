@@ -42,7 +42,12 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 import tools as _tools_mod
 from guardrails_runner import create_guardrail
 from agentic_runner import run_split_criteria_guardrail
-from reliability_metrics import build_reliability_report
+from reliability_metrics import (
+    build_reliability_report,
+    compare_collapse_schemes,
+    compare_tool_call_outputs,
+    format_evidence_reproducibility_report,
+)
 
 
 def _load_text_file(path: str) -> str:
@@ -151,6 +156,11 @@ def run_diagnostic(
                 "ag_criteria": {cv["criterion"]: cv["verdict"] for cv in ag.criteria_verdicts},
                 "ag_tools_called": tools_called,
                 "ag_tool_calls_made": ag.tool_calls_made,
+                # Full tool call log (not just names) -- Issue #54: lets us
+                # check whether the EVIDENCE itself (tool inputs/outputs) is
+                # reproducible across runs, separately from whether the
+                # verdict built on top of it is.
+                "ag_tool_call_log": ag.tool_call_log,
             }
         )
     return results
@@ -188,7 +198,28 @@ def main() -> None:
     ag_report = build_reliability_report(
         [r["ag_criteria"] for r in results], label="AGENTIC (tool-verified)"
     )
-    report_text = "\n\n".join([na_report.format_report(), ag_report.format_report()])
+
+    # Issue #54: does coarsening the verdict scale actually reduce measured
+    # instability, and is the underlying tool evidence itself reproducible?
+    na_collapse = compare_collapse_schemes([r["na_criteria"] for r in results], label="non-agentic")
+    ag_collapse = compare_collapse_schemes([r["ag_criteria"] for r in results], label="agentic")
+    collapse_lines = ["=== Verdict scale collapse comparison (Issue #54) ==="]
+    for path_label, comparison in [("non-agentic", na_collapse), ("agentic", ag_collapse)]:
+        collapse_lines.append(f"  {path_label}:")
+        for scheme, stats in comparison.items():
+            kappa_str = f"{stats['kappa']:.4f}" if stats["kappa"] is not None else "undefined"
+            collapse_lines.append(
+                f"    {scheme:10s} kappa={kappa_str}  "
+                f"unstable={stats['n_unstable_criteria']}/{stats['n_criteria']}"
+            )
+    collapse_text = "\n".join(collapse_lines)
+
+    evidence_entries = compare_tool_call_outputs([r["ag_tool_call_log"] for r in results])
+    evidence_text = format_evidence_reproducibility_report(evidence_entries)
+
+    report_text = "\n\n".join(
+        [na_report.format_report(), ag_report.format_report(), collapse_text, evidence_text]
+    )
     print("\n" + report_text)
 
     report_path = f"{args.output_prefix}_reliability_report.txt"

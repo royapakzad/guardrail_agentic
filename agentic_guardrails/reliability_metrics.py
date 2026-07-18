@@ -18,7 +18,8 @@ judge model); each criterion is one "item" being rated by each run.
 """
 from __future__ import annotations
 
-from collections import Counter
+import json
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 
@@ -130,3 +131,138 @@ def build_reliability_report(runs: list, label: str) -> ReliabilityReport:
         criterion_stats=compute_flip_rates(runs),
         kappa=fleiss_kappa(runs),
     )
+
+
+# ══ Category collapse (Issue #54) ═══════════════════════════════════════════
+# Recompute flip-rate/kappa under a coarser verdict scale from data we've
+# already collected, so we can empirically check which collapse (if any)
+# actually reduces measured instability -- rather than assuming and changing
+# the live judge's output schema before knowing whether it would help.
+#
+# Schemes are named for the question they answer, and reuse the exact
+# vocabulary ("COMPLIANT", "violation") already used in guardrails_runner.py's
+# SHARED_SEVERITY_ANCHORS rubric text, rather than inventing new labels:
+#
+#   severity_tier: keeps COMPLIANT vs MINOR_ISSUE separate (useful for the
+#     "improvements_required" feedback loop) and merges only MAJOR_ISSUE +
+#     CRITICAL -> VIOLATION. Defensible because CRITICAL is explicitly meant
+#     to be rare ("reserve this tier for categorically prohibited content"),
+#     and MAJOR_ISSUE/CRITICAL was never the boundary that flipped in any
+#     diagnostic run collected so far.
+#
+#   harm_based: directly re-derives the rubric's own stated decision test
+#     ("would the user be meaningfully worse off because of this gap?") by
+#     merging COMPLIANT + MINOR_ISSUE -> COMPLIANT (that test's "no" answer)
+#     and MAJOR_ISSUE + CRITICAL -> VIOLATION (its "yes" answer).
+#
+# Empirical grounding (see Issue #54): every flip observed so far in
+# repeated-run diagnostics, across all three domains, was COMPLIANT <->
+# MINOR_ISSUE. None touched MAJOR_ISSUE/CRITICAL. That means severity_tier
+# is expected to leave kappa/flip-rate unchanged on data seen so far, while
+# harm_based would eliminate those flips -- but only by merging away the
+# exact distinction that was flip-flopping, not by making the underlying
+# reasoning more consistent. Both are provided so that tradeoff is visible
+# in the numbers rather than assumed.
+COLLAPSE_SCHEMES: dict = {
+    "full": {},  # identity -- no collapse; unmapped verdicts pass through unchanged
+    "severity_tier": {
+        "MINOR_ISSUE": "MINOR",
+        "MAJOR_ISSUE": "VIOLATION",
+        "CRITICAL": "VIOLATION",
+    },
+    "harm_based": {
+        "COMPLIANT": "COMPLIANT",
+        "MINOR_ISSUE": "COMPLIANT",
+        "MAJOR_ISSUE": "VIOLATION",
+        "CRITICAL": "VIOLATION",
+    },
+}
+
+
+def collapse_runs(runs: list, scheme: str) -> list:
+    """
+    Remap verdict labels in every run according to a named entry in
+    COLLAPSE_SCHEMES. Verdicts not mentioned in the scheme pass through
+    unchanged (so this works regardless of which verdict vocabulary a
+    given policy happens to use -- domain-agnostic, same as the rest of
+    this module).
+    """
+    if scheme not in COLLAPSE_SCHEMES:
+        raise ValueError(f"Unknown collapse scheme {scheme!r}. Known: {sorted(COLLAPSE_SCHEMES)}")
+    mapping = COLLAPSE_SCHEMES[scheme]
+    return [{c: mapping.get(v, v) for c, v in run.items()} for run in runs]
+
+
+def compare_collapse_schemes(runs: list, label: str) -> dict:
+    """
+    Recompute kappa (and count of unstable criteria) under every known
+    collapse scheme, so the effect of coarsening the verdict scale is a
+    measured number, not an assumption.
+    """
+    report = {}
+    for scheme in COLLAPSE_SCHEMES:
+        collapsed = collapse_runs(runs, scheme)
+        r = build_reliability_report(collapsed, label=f"{label} [{scheme}]")
+        report[scheme] = {
+            "kappa": r.kappa,
+            "n_unstable_criteria": len(r.unstable_criteria()),
+            "n_criteria": len(r.criterion_stats),
+        }
+    return report
+
+
+# ══ Evidence reproducibility (Issue #54) ════════════════════════════════════
+# Separates "is the evidence itself reproducible" from "is the verdict built
+# on top of that evidence reproducible" -- the two things a single kappa
+# number conflates. Tool calls are deterministic API/database lookups
+# (unlike the judge's categorical verdict), so this is expected to show
+# near-perfect reproducibility, isolating the noise to the verdict-mapping
+# layer rather than the evidence-gathering layer.
+
+
+def compare_tool_call_outputs(runs_tool_logs: list) -> list:
+    """
+    runs_tool_logs: one list of tool-call-log entries per run, each entry a
+    dict with at least {"tool": str, "input": dict, "output_preview": str}
+    (the same shape agentic_runner.py's tool_call_log already uses).
+
+    For every (tool, input) pair that was called in 2+ runs, check whether
+    the returned output was byte-identical every time. Returns one entry
+    per such repeated (tool, input) pair, sorted by tool name then input,
+    for stable output ordering.
+    """
+    calls_by_key: dict = defaultdict(list)
+    for run_idx, log in enumerate(runs_tool_logs):
+        for entry in log:
+            key = (entry.get("tool", ""), json.dumps(entry.get("input", {}), sort_keys=True))
+            calls_by_key[key].append((run_idx, entry.get("output_preview", "")))
+
+    report = []
+    for (tool, input_json), calls in sorted(calls_by_key.items()):
+        if len(calls) < 2:
+            continue
+        outputs = [o for _, o in calls]
+        distinct = sorted(set(outputs))
+        report.append(
+            {
+                "tool": tool,
+                "input": json.loads(input_json),
+                "n_calls": len(calls),
+                "identical_output": len(distinct) == 1,
+                "distinct_outputs": len(distinct),
+            }
+        )
+    return report
+
+
+def format_evidence_reproducibility_report(entries: list) -> str:
+    if not entries:
+        return "No (tool, input) pair was repeated across 2+ runs -- nothing to compare."
+    lines = ["Evidence reproducibility (same tool + same input, across repeated runs):"]
+    for e in entries:
+        flag = "" if e["identical_output"] else "  <<< EVIDENCE ITSELF CHANGED"
+        lines.append(
+            f"  {e['tool']}({e['input']}) -- {e['n_calls']} calls, "
+            f"{e['distinct_outputs']} distinct output(s){flag}"
+        )
+    return "\n".join(lines)

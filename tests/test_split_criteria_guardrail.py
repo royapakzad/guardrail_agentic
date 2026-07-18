@@ -189,15 +189,15 @@ def test_score_all_compliant():
     assert _recompute_score_from_criteria(verdicts) == 1.0
 
 
-def test_score_one_major_issue():
-    verdicts = [_cv("A", "MAJOR_ISSUE"), _cv("B", "COMPLIANT")]
-    # 1.0 - 0.25 = 0.75
-    assert _recompute_score_from_criteria(verdicts) == 0.75
+def test_score_one_not_fully_compliant():
+    verdicts = [_cv("A", "NOT_FULLY_COMPLIANT"), _cv("B", "COMPLIANT")]
+    # 1.0 - 0.20 = 0.80
+    assert _recompute_score_from_criteria(verdicts) == 0.80
 
 
 def test_score_clamps_at_minimum():
-    verdicts = [_cv(str(i), "CRITICAL") for i in range(5)]
-    # 1.0 - 5*0.50 = -1.5 → clamped to 0.05
+    verdicts = [_cv(str(i), "NOT_FULLY_COMPLIANT") for i in range(5)]
+    # 1.0 - 5*0.20 = 0.0 → clamped to 0.05
     assert _recompute_score_from_criteria(verdicts) == 0.05
 
 
