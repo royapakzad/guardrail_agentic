@@ -1,0 +1,91 @@
+"use client";
+
+import { useState } from "react";
+import type { UseCase } from "@/lib/types";
+
+type Props = {
+  useCase: UseCase;
+};
+
+export function CodebookForm({ useCase }: Props) {
+  const [status, setStatus] = useState<"idle" | "submitting" | "done" | "error">("idle");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setStatus("submitting");
+    setErrorMessage(null);
+
+    const form = new FormData(e.currentTarget);
+    const body = {
+      useCase,
+      name: form.get("name"),
+      definition: form.get("definition"),
+      exampleQuote: form.get("exampleQuote") || null,
+      theme: form.get("theme") || null,
+      createdBy: form.get("createdBy"),
+    };
+
+    try {
+      const res = await fetch("/api/codebook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? `Request failed (${res.status})`);
+      }
+      setStatus("done");
+      e.currentTarget.reset();
+      window.location.reload();
+    } catch (err) {
+      setStatus("error");
+      setErrorMessage(err instanceof Error ? err.message : "Submission failed");
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-md border border-slate-200 bg-white p-4">
+      <h3 className="text-sm font-semibold text-slate-800">Add a code</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Code name</label>
+          <input name="name" required className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Theme</label>
+          <input
+            name="theme"
+            placeholder="e.g. Evidence calibration"
+            className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+          />
+        </div>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">
+          Definition (inclusion/exclusion criteria — when does this code apply?)
+        </label>
+        <textarea name="definition" required rows={2} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">Example quote</label>
+        <textarea name="exampleQuote" rows={2} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">Your name</label>
+        <input name="createdBy" required className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={status === "submitting"}
+          className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+        >
+          {status === "submitting" ? "Saving…" : "Add code"}
+        </button>
+        {status === "error" && <span className="text-sm text-red-700">{errorMessage}</span>}
+      </div>
+    </form>
+  );
+}

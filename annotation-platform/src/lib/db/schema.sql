@@ -46,3 +46,42 @@ CREATE TABLE IF NOT EXISTS datasets (
 );
 
 CREATE INDEX IF NOT EXISTS datasets_use_case_idx ON datasets (use_case, uploaded_at DESC);
+
+-- Qualitative coding / thematic analysis (Issue #57) -----------------------
+-- Standard HCI/CSCW thematic-analysis workflow: a shared, evolving codebook
+-- (codes grouped into themes) that annotators apply to scenario text.
+-- Multiple annotators can independently code the same scenario/field, which
+-- is what the method needs for later reconciliation -- this schema doesn't
+-- compute inter-coder agreement itself (see Issue #57's fast-follow note).
+
+CREATE TABLE IF NOT EXISTS codebook_codes (
+  id SERIAL PRIMARY KEY,
+  use_case TEXT NOT NULL,
+  name TEXT NOT NULL,
+  definition TEXT NOT NULL,
+  example_quote TEXT,
+  theme TEXT,
+  created_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (use_case, name)
+);
+
+CREATE INDEX IF NOT EXISTS codebook_codes_use_case_idx ON codebook_codes (use_case, theme);
+
+CREATE TABLE IF NOT EXISTS code_applications (
+  id SERIAL PRIMARY KEY,
+  scenario_id TEXT NOT NULL,
+  use_case TEXT NOT NULL,
+  language TEXT NOT NULL,
+  policy_label TEXT NOT NULL,
+  annotator_name TEXT NOT NULL,
+  code_id INTEGER NOT NULL REFERENCES codebook_codes(id) ON DELETE CASCADE,
+  target_field TEXT NOT NULL,
+  quote_text TEXT,
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS code_applications_scenario_idx ON code_applications (use_case, scenario_id);
+CREATE INDEX IF NOT EXISTS code_applications_code_idx ON code_applications (code_id);

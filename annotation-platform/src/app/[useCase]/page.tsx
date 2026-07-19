@@ -2,13 +2,15 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { USE_CASES, getRecordsForDataset, SEED_DATASET_ID } from "@/lib/adapters";
 import { resolveDatasetIdParam } from "@/lib/datasetSelection";
-import { listDatasets } from "@/lib/db/queries";
+import { listDatasets, listCodeApplicationsForUseCase } from "@/lib/db/queries";
 import { DatasetPicker } from "@/lib/ui/DatasetPicker";
+import { BarChart } from "@/lib/ui/BarChart";
 import type { UseCase } from "@/lib/types";
 import {
   computeAcronymChecks,
   computeComplianceByCriterion,
   computeCriterionFlips,
+  computeDomainUsage,
   computeFlipRate,
   computeLanguageFlips,
   computeLatency,
@@ -54,6 +56,20 @@ export default async function UseCaseDashboard({
   const tokens = computeTokenUsage(records);
   const acronymChecks = computeAcronymChecks(records);
   const languageFlips = computeLanguageFlips(useCase, records);
+  const domainUsage = computeDomainUsage(records);
+  const codeApplications = await listCodeApplicationsForUseCase(useCase).catch(() => []);
+
+  const codeFrequency = new Map<string, number>();
+  const themeByCode = new Map<string, string>();
+  for (const a of codeApplications) {
+    const key = a.code_name;
+    codeFrequency.set(key, (codeFrequency.get(key) ?? 0) + 1);
+    themeByCode.set(key, a.code_theme ?? "(no theme)");
+  }
+  const codeFrequencyData = [...codeFrequency.entries()].map(([label, value]) => ({
+    label: `${themeByCode.get(label)} / ${label}`,
+    value,
+  }));
 
   const labels = scoreDeltas.map((s) => s.label);
 
@@ -64,7 +80,8 @@ export default async function UseCaseDashboard({
           <h1 className="text-2xl font-semibold tracking-tight capitalize">{useCase} dashboard</h1>
           <p className="mt-1 text-sm text-slate-600">
             {records.length} scenarios · {labels.length} policy variants ·{" "}
-            <Link href={`/${useCase}/scenarios`} className="underline">browse scenarios &amp; annotate</Link>
+            <Link href={`/${useCase}/scenarios`} className="underline">browse scenarios &amp; annotate</Link> ·{" "}
+            <Link href={`/${useCase}/codebook`} className="underline">codebook &amp; qualitative coding</Link>
           </p>
         </div>
         <DatasetPicker useCase={useCase} datasets={availableDatasets} currentId={String(datasetId)} basePath={`/${useCase}`} />
@@ -166,6 +183,34 @@ export default async function UseCaseDashboard({
       </Section>
 
       <Section
+        title="Domains used during judging"
+        note="Which web domains show up during tool use — 'Search result domains' is from search_web results only; 'All domains' is every URL touched by any tool call (fetch_url, check_url_validity, urlscan_check, and any URL embedded in a domain-specific tool's own output)."
+      >
+        <div className="flex flex-col gap-4">
+          {domainUsage.map((d) => (
+            <details key={d.label} className="rounded-md border border-slate-200 bg-white" open={domainUsage.length === 1}>
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 bg-slate-50">
+                {d.label}{" "}
+                <span className="font-normal text-slate-400">
+                  ({d.totalUrlCount} URL touches · {d.distinctUrlCount} distinct URLs · {d.distinctDomainCount} distinct domains)
+                </span>
+              </summary>
+              <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">Search result domains</h3>
+                  <BarChart data={d.searchDomains.map((c) => ({ label: c.domain, value: c.count }))} unitLabel="results" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">All domains (every tool call)</h3>
+                  <BarChart data={d.allDomains.map((c) => ({ label: c.domain, value: c.count }))} unitLabel="occurrences" />
+                </div>
+              </div>
+            </details>
+          ))}
+        </div>
+      </Section>
+
+      <Section
         title="Tool-selection consistency"
         note="Best-effort text-pattern heuristic (no gold labels for this batch data) — see lib/metrics/toolSelectionConsistency.ts."
       >
@@ -252,11 +297,23 @@ export default async function UseCaseDashboard({
           <p className="text-sm text-slate-500">No paired second language configured/available for this use case.</p>
         )}
       </Section>
+
+      <Section
+        title="Qualitative code frequency"
+        note={
+          <>
+            How often each codebook code has been applied by annotators, grouped by theme — see the{" "}
+            <Link href={`/${useCase}/codebook`} className="underline">codebook</Link> to add or refine codes.
+          </>
+        }
+      >
+        <BarChart data={codeFrequencyData} unitLabel="applications" />
+      </Section>
     </div>
   );
 }
 
-function Section({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
+function Section({ title, note, children }: { title: string; note?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-2">
       <div>
