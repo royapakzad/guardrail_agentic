@@ -18,3 +18,5 @@ export { computeComplianceByCriterion } from "./complianceByCriterion";
 export type { ComplianceByCriterionSummary, CriterionComplianceRow, VerdictCounts } from "./complianceByCriterion";
 export { computeCriterionFlips } from "./criterionFlips";
 export type { CriterionFlipSummary, CriterionFlipRow } from "./criterionFlips";
+export { computeDomainUsage } from "./domainUsage";
+export type { DomainUsageSummary, DomainCount } from "./domainUsage";

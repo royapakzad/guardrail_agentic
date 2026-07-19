@@ -4,8 +4,10 @@ import { getRecordByIdForDataset, USE_CASES } from "@/lib/adapters";
 import { resolveDatasetIdParam } from "@/lib/datasetSelection";
 import type { UseCase, PolicyVariant, JudgePass, AgenticPass } from "@/lib/types";
 import { ScoreBar, ValidBadge, VerdictBadge } from "@/lib/ui/badges";
-import { listAnnotations } from "@/lib/db/queries";
+import { listAnnotations, listCodebookCodes, listCodeApplications } from "@/lib/db/queries";
 import { AnnotationForm } from "./AnnotationForm";
+import { QualitativeCodingForm } from "./QualitativeCodingForm";
+import { CODING_TARGET_FIELD_LABELS, type CodingTargetField } from "@/lib/annotationOptions";
 
 function isUseCase(value: string): value is UseCase {
   return (USE_CASES as string[]).includes(value);
@@ -37,6 +39,18 @@ export default async function ScenarioDetailPage({
     annotations = await listAnnotations(useCase, record.id);
   } catch (err) {
     dbError = err instanceof Error ? err.message : "Could not load annotations";
+  }
+
+  let codes: Awaited<ReturnType<typeof listCodebookCodes>> = [];
+  let codeApplications: Awaited<ReturnType<typeof listCodeApplications>> = [];
+  let codingDbError: string | null = null;
+  try {
+    [codes, codeApplications] = await Promise.all([
+      listCodebookCodes(useCase),
+      listCodeApplications(useCase, record.id),
+    ]);
+  } catch (err) {
+    codingDbError = err instanceof Error ? err.message : "Could not load qualitative coding data";
   }
 
   return (
@@ -141,6 +155,50 @@ export default async function ScenarioDetailPage({
           </ul>
         </section>
       )}
+
+      <section>
+        <h2 className="text-lg font-semibold mb-1">Qualitative coding</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Apply codes from the <Link href={`/${useCase}/codebook`} className="underline">use case&apos;s codebook</Link> to
+          specific text in this scenario (thematic-analysis style coding, separate from the structured annotation below).
+        </p>
+        {codingDbError ? (
+          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-300 rounded px-3 py-2">
+            Could not load qualitative coding data: {codingDbError}
+          </p>
+        ) : (
+          <>
+            {codeApplications.length === 0 ? (
+              <p className="text-sm text-slate-500 mb-3">No codes applied to this scenario yet.</p>
+            ) : (
+              <div className="flex flex-col gap-2 mb-4">
+                {codeApplications.map((a) => (
+                  <div key={a.id} className="rounded border border-slate-200 bg-white p-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono font-medium text-slate-800">
+                        {a.code_theme ? `${a.code_theme} / ` : ""}{a.code_name}
+                      </span>
+                      <span className="text-xs text-slate-400 shrink-0">{new Date(a.created_at).toLocaleString()}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {a.annotator_name} · {CODING_TARGET_FIELD_LABELS[a.target_field as CodingTargetField] ?? a.target_field}
+                    </div>
+                    {a.quote_text && <p className="mt-1 text-sm italic text-slate-700">“{a.quote_text}”</p>}
+                    {a.note && <p className="mt-1 text-sm text-slate-600">{a.note}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+            <QualitativeCodingForm
+              useCase={useCase}
+              scenarioId={record.id}
+              language={record.language}
+              policyLabel={variant.label}
+              codes={codes}
+            />
+          </>
+        )}
+      </section>
 
       <section>
         <h2 className="text-lg font-semibold mb-3">Annotations</h2>
