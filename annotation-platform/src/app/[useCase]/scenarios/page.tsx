@@ -4,6 +4,7 @@ import { USE_CASES, getRecordsForDataset } from "@/lib/adapters";
 import { resolveDatasetIdParam } from "@/lib/datasetSelection";
 import { listDatasets } from "@/lib/db/queries";
 import { DatasetPicker } from "@/lib/ui/DatasetPicker";
+import { UseCaseNav } from "@/lib/ui/UseCaseNav";
 import type { UseCase } from "@/lib/types";
 
 function isUseCase(value: string): value is UseCase {
@@ -34,12 +35,12 @@ export default async function ScenarioListPage({
 
   return (
     <div className="flex flex-col gap-6">
+      <UseCaseNav useCase={useCase} datasetId={String(datasetId)} />
+
       <div className="flex items-baseline justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight capitalize">{useCase} scenarios</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            {records.length} scenarios · <Link href={`/${useCase}`} className="underline">back to dashboard</Link>
-          </p>
+          <p className="mt-1 text-sm text-slate-600">{records.length} scenarios</p>
         </div>
         <DatasetPicker useCase={useCase} datasets={availableDatasets} currentId={String(datasetId)} basePath={`/${useCase}/scenarios`} />
       </div>

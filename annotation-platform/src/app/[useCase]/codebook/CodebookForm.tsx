@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import type { UseCase } from "@/lib/types";
 
 type Props = {
@@ -8,6 +9,7 @@ type Props = {
 };
 
 export function CodebookForm({ useCase }: Props) {
+  const router = useRouter();
   const [status, setStatus] = useState<"idle" | "submitting" | "done" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -38,7 +40,7 @@ export function CodebookForm({ useCase }: Props) {
       }
       setStatus("done");
       e.currentTarget.reset();
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       setStatus("error");
       setErrorMessage(err instanceof Error ? err.message : "Submission failed");
@@ -46,7 +48,7 @@ export function CodebookForm({ useCase }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-md border border-slate-200 bg-white p-4">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-md border border-violet-200 bg-violet-50/40 p-4">
       <h3 className="text-sm font-semibold text-slate-800">Add a code</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
@@ -84,6 +86,7 @@ export function CodebookForm({ useCase }: Props) {
         >
           {status === "submitting" ? "Saving…" : "Add code"}
         </button>
+        {status === "done" && <span className="text-sm font-medium text-emerald-700">✓ Code added</span>}
         {status === "error" && <span className="text-sm text-red-700">{errorMessage}</span>}
       </div>
     </form>

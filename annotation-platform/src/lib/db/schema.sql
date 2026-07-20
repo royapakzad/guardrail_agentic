@@ -85,3 +85,9 @@ CREATE TABLE IF NOT EXISTS code_applications (
 
 CREATE INDEX IF NOT EXISTS code_applications_scenario_idx ON code_applications (use_case, scenario_id);
 CREATE INDEX IF NOT EXISTS code_applications_code_idx ON code_applications (code_id);
+
+-- Edit tracking for the platform UX redesign (annotations/code_applications
+-- gain edit/delete UI; codebook_codes already had updated_at from the start).
+-- Additive and idempotent -- safe to re-run against an existing database.
+ALTER TABLE annotations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE code_applications ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();

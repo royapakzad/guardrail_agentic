@@ -17,6 +17,7 @@ export type Annotation = {
   free_text: string | null;
   confidence: string | null;
   created_at: string;
+  updated_at: string;
 };
 
 export type NewAnnotation = {
@@ -59,6 +60,52 @@ export async function listAnnotations(useCase: UseCase, scenarioId: string): Pro
     ORDER BY created_at DESC
   `;
   return rows as Annotation[];
+}
+
+export async function listAnnotationsForUseCase(useCase: UseCase): Promise<Annotation[]> {
+  const sql = getSql();
+  const rows = await sql`
+    SELECT * FROM annotations
+    WHERE use_case = ${useCase}
+    ORDER BY created_at DESC
+  `;
+  return rows as Annotation[];
+}
+
+export type UpdateAnnotation = {
+  id: number;
+  agreesWithVerdict: boolean | null;
+  disagreementReason: string | null;
+  evidenceSourceType: string | null;
+  deductionReasonCategory: string | null;
+  evidentiaryAttributionPresent: boolean | null;
+  freeText: string | null;
+  confidence: string | null;
+};
+
+export async function updateAnnotation(input: UpdateAnnotation): Promise<Annotation | null> {
+  const sql = getSql();
+  const rows = await sql`
+    UPDATE annotations
+    SET
+      agrees_with_verdict = ${input.agreesWithVerdict},
+      disagreement_reason = ${input.disagreementReason},
+      evidence_source_type = ${input.evidenceSourceType},
+      deduction_reason_category = ${input.deductionReasonCategory},
+      evidentiary_attribution_present = ${input.evidentiaryAttributionPresent},
+      free_text = ${input.freeText},
+      confidence = ${input.confidence},
+      updated_at = now()
+    WHERE id = ${input.id}
+    RETURNING *
+  `;
+  return (rows[0] as Annotation) ?? null;
+}
+
+export async function deleteAnnotation(id: number): Promise<boolean> {
+  const sql = getSql();
+  const rows = await sql`DELETE FROM annotations WHERE id = ${id} RETURNING id`;
+  return rows.length > 0;
 }
 
 export type GoldLabel = {
@@ -215,6 +262,21 @@ export async function updateCodebookCode(input: UpdateCodebookCode): Promise<Cod
   return (rows[0] as CodebookCode) ?? null;
 }
 
+/** code_applications.code_id has ON DELETE CASCADE, so deleting a code with
+ * existing applications would silently wipe their coding history -- callers
+ * check this count first and require explicit confirmation once it's > 0. */
+export async function countCodeApplicationsForCode(codeId: number): Promise<number> {
+  const sql = getSql();
+  const rows = await sql`SELECT count(*)::int AS count FROM code_applications WHERE code_id = ${codeId}`;
+  return (rows[0] as { count: number })?.count ?? 0;
+}
+
+export async function deleteCodebookCode(id: number): Promise<boolean> {
+  const sql = getSql();
+  const rows = await sql`DELETE FROM codebook_codes WHERE id = ${id} RETURNING id`;
+  return rows.length > 0;
+}
+
 export type CodeApplication = {
   id: number;
   scenario_id: string;
@@ -227,6 +289,7 @@ export type CodeApplication = {
   quote_text: string | null;
   note: string | null;
   created_at: string;
+  updated_at: string;
 };
 
 export type CodeApplicationWithCode = CodeApplication & {
@@ -283,4 +346,27 @@ export async function listCodeApplicationsForUseCase(useCase: UseCase): Promise<
     ORDER BY ca.created_at DESC
   `;
   return rows as CodeApplicationWithCode[];
+}
+
+export type UpdateCodeApplication = {
+  id: number;
+  quoteText: string | null;
+  note: string | null;
+};
+
+export async function updateCodeApplication(input: UpdateCodeApplication): Promise<CodeApplication | null> {
+  const sql = getSql();
+  const rows = await sql`
+    UPDATE code_applications
+    SET quote_text = ${input.quoteText}, note = ${input.note}, updated_at = now()
+    WHERE id = ${input.id}
+    RETURNING *
+  `;
+  return (rows[0] as CodeApplication) ?? null;
+}
+
+export async function deleteCodeApplication(id: number): Promise<boolean> {
+  const sql = getSql();
+  const rows = await sql`DELETE FROM code_applications WHERE id = ${id} RETURNING id`;
+  return rows.length > 0;
 }

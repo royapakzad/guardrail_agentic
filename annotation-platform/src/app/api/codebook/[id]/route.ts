@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { updateCodebookCode } from "@/lib/db/queries";
+import { updateCodebookCode, deleteCodebookCode, countCodeApplicationsForCode } from "@/lib/db/queries";
 import { dbErrorResponse } from "@/lib/db/apiError";
 
 // Codebooks are meant to evolve iteratively (the standard thematic-analysis
@@ -29,6 +29,42 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: "Code not found" }, { status: 404 });
     }
     return NextResponse.json({ code });
+  } catch (error) {
+    return dbErrorResponse(error);
+  }
+}
+
+// code_applications.code_id has ON DELETE CASCADE -- deleting a code that
+// already has applications would silently wipe that coding history. Require
+// an explicit confirmCascade:true once the count is non-zero, so the UI can
+// show "this will also delete N applications" before resubmitting.
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id: idParam } = await params;
+  const id = Number(idParam);
+  if (!Number.isInteger(id)) {
+    return NextResponse.json({ error: "Invalid code id" }, { status: 400 });
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const confirmCascade = Boolean(body?.confirmCascade);
+
+  try {
+    const applicationCount = await countCodeApplicationsForCode(id);
+    if (applicationCount > 0 && !confirmCascade) {
+      return NextResponse.json(
+        {
+          error: `This code has been applied ${applicationCount} time(s). Resubmit with confirmCascade: true to delete it and those applications.`,
+          applicationCount,
+        },
+        { status: 409 }
+      );
+    }
+
+    const deleted = await deleteCodebookCode(id);
+    if (!deleted) {
+      return NextResponse.json({ error: "Code not found" }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true, applicationsDeleted: applicationCount });
   } catch (error) {
     return dbErrorResponse(error);
   }
