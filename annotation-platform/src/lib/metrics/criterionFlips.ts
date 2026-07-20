@@ -7,7 +7,7 @@ export type CriterionFlipRow = {
   n: number; // scenarios where this criterion was evaluated on both passes
   flippedCount: number;
   flipRate: number | null;
-  transitions: { from: string; to: string; count: number }[]; // e.g. MINOR_ISSUE -> COMPLIANT: 3
+  transitions: { from: string; to: string; count: number }[]; // e.g. NOT_FULLY_COMPLIANT -> COMPLIANT: 3
 };
 
 export type CriterionFlipSummary = {

@@ -2,7 +2,10 @@ import type { EvaluationRecord } from "@/lib/types";
 import { normalizeCriterionName, isToolTaggedCriterion } from "@/lib/policyCriteria";
 import { flattenVariants, groupByLabel, round } from "./flatten";
 
-const VERDICTS = ["COMPLIANT", "MINOR_ISSUE", "MAJOR_ISSUE", "CRITICAL"] as const;
+// Binary compliance scale (Issue #54 follow-up). Older uploaded datasets from
+// before that change may still carry MINOR_ISSUE/MAJOR_ISSUE/CRITICAL -- those
+// fall into the `other` bucket below rather than being silently miscounted.
+const VERDICTS = ["COMPLIANT", "NOT_FULLY_COMPLIANT"] as const;
 type Verdict = (typeof VERDICTS)[number];
 
 export type VerdictCounts = Record<Verdict, number> & { other: number };
@@ -22,7 +25,7 @@ export type ComplianceByCriterionSummary = {
 };
 
 function emptyCounts(): VerdictCounts {
-  return { COMPLIANT: 0, MINOR_ISSUE: 0, MAJOR_ISSUE: 0, CRITICAL: 0, other: 0 };
+  return { COMPLIANT: 0, NOT_FULLY_COMPLIANT: 0, other: 0 };
 }
 
 function tally(counts: VerdictCounts, verdict: string) {

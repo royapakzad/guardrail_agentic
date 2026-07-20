@@ -5,7 +5,6 @@ import { resolveDatasetIdParam } from "@/lib/datasetSelection";
 import { listDatasets } from "@/lib/db/queries";
 import { DatasetPicker } from "@/lib/ui/DatasetPicker";
 import type { UseCase } from "@/lib/types";
-import { ScoreBar, ValidBadge } from "@/lib/ui/badges";
 
 function isUseCase(value: string): value is UseCase {
   return (USE_CASES as string[]).includes(value);
@@ -72,12 +71,19 @@ export default async function ScenarioListPage({
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-2">
-                    {r.policyVariants.map((v) => (
-                      <span key={v.label} className="inline-flex items-center gap-1 text-xs">
-                        <ValidBadge valid={v.agentic.valid} />
-                        <ScoreBar score={v.agentic.score} />
-                      </span>
-                    ))}
+                    {r.policyVariants.map((v) => {
+                      const total = v.agentic.criteriaVerdicts.length;
+                      const compliant = v.agentic.criteriaVerdicts.filter((c) => c.verdict === "COMPLIANT").length;
+                      return (
+                        <span
+                          key={v.label}
+                          className="inline-flex items-center gap-1 text-xs rounded-full bg-slate-100 px-2 py-0.5 tabular-nums text-slate-700"
+                          title={v.label}
+                        >
+                          {total > 0 ? `${compliant}/${total} compliant` : "—"}
+                        </span>
+                      );
+                    })}
                   </div>
                 </td>
               </tr>
