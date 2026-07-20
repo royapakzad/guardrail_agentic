@@ -1,3 +1,14 @@
+/*
+ * Semantic color convention for this app (Tailwind slate/sky/emerald/amber/red/violet):
+ *   slate   — structure & neutral chrome (nav, cards, secondary text)
+ *   sky     — interactive/tool-related (evidence source, links, tool badges)
+ *   emerald — compliant / agree / success
+ *   amber   — not fully compliant / disagree / needs review
+ *   red     — errors, destructive actions (delete)
+ *   violet  — qualitative-coding accent, reserved for codebook/coding UI so
+ *             "the judge's evaluation" (slate/sky/emerald/amber) stays visually
+ *             distinct from "your qualitative coding" (violet)
+ */
 const VERDICT_COLORS: Record<string, string> = {
   COMPLIANT: "bg-emerald-100 text-emerald-800",
   NOT_FULLY_COMPLIANT: "bg-amber-100 text-amber-800",

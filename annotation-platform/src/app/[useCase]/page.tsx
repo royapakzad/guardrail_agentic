@@ -5,6 +5,7 @@ import { resolveDatasetIdParam } from "@/lib/datasetSelection";
 import { listDatasets, listCodeApplicationsForUseCase } from "@/lib/db/queries";
 import { DatasetPicker } from "@/lib/ui/DatasetPicker";
 import { BarChart } from "@/lib/ui/BarChart";
+import { UseCaseNav } from "@/lib/ui/UseCaseNav";
 import type { UseCase } from "@/lib/types";
 import {
   computeAcronymChecks,
@@ -74,14 +75,14 @@ export default async function UseCaseDashboard({
   const labels = scoreDeltas.map((s) => s.label);
 
   return (
-    <div className="flex flex-col gap-10">
+    <div className="flex flex-col gap-8">
+      <UseCaseNav useCase={useCase} datasetId={String(datasetId)} />
+
       <div className="flex items-baseline justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight capitalize">{useCase} dashboard</h1>
           <p className="mt-1 text-sm text-slate-600">
-            {records.length} scenarios · {labels.length} policy variants ·{" "}
-            <Link href={`/${useCase}/scenarios`} className="underline">browse scenarios &amp; annotate</Link> ·{" "}
-            <Link href={`/${useCase}/codebook`} className="underline">codebook &amp; qualitative coding</Link>
+            {records.length} scenarios · {labels.length} policy variants
           </p>
         </div>
         <DatasetPicker useCase={useCase} datasets={availableDatasets} currentId={String(datasetId)} basePath={`/${useCase}`} />
