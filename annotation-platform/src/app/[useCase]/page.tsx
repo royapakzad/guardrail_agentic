@@ -368,21 +368,17 @@ function ComplianceTable({ rows }: { rows: CriterionComplianceRow[] }) {
           <tr className="border-b border-slate-200 bg-slate-50 text-left">
             <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Criterion</th>
             <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Tool-tagged</th>
-            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap" colSpan={5}>Non-agentic</th>
-            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap" colSpan={5}>Agentic / final</th>
+            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap" colSpan={3}>Non-agentic</th>
+            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap" colSpan={3}>Agentic / final</th>
           </tr>
           <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
             <th className="px-3 py-1"></th>
             <th className="px-3 py-1"></th>
             <th className="px-3 py-1 whitespace-nowrap">Compliant</th>
-            <th className="px-3 py-1 whitespace-nowrap">Minor</th>
-            <th className="px-3 py-1 whitespace-nowrap">Major</th>
-            <th className="px-3 py-1 whitespace-nowrap">Critical</th>
+            <th className="px-3 py-1 whitespace-nowrap">Not fully compliant</th>
             <th className="px-3 py-1 whitespace-nowrap">Rate</th>
             <th className="px-3 py-1 whitespace-nowrap">Compliant</th>
-            <th className="px-3 py-1 whitespace-nowrap">Minor</th>
-            <th className="px-3 py-1 whitespace-nowrap">Major</th>
-            <th className="px-3 py-1 whitespace-nowrap">Critical</th>
+            <th className="px-3 py-1 whitespace-nowrap">Not fully compliant</th>
             <th className="px-3 py-1 whitespace-nowrap">Rate</th>
           </tr>
         </thead>
@@ -398,14 +394,10 @@ function ComplianceTable({ rows }: { rows: CriterionComplianceRow[] }) {
                 )}
               </td>
               <td className="px-3 py-2 tabular-nums">{r.nonagentic.COMPLIANT}</td>
-              <td className="px-3 py-2 tabular-nums">{r.nonagentic.MINOR_ISSUE}</td>
-              <td className="px-3 py-2 tabular-nums">{r.nonagentic.MAJOR_ISSUE}</td>
-              <td className="px-3 py-2 tabular-nums">{r.nonagentic.CRITICAL}</td>
+              <td className="px-3 py-2 tabular-nums">{r.nonagentic.NOT_FULLY_COMPLIANT}</td>
               <td className="px-3 py-2 tabular-nums">{r.nonagenticComplianceRate !== null ? `${(r.nonagenticComplianceRate * 100).toFixed(0)}%` : "—"}</td>
               <td className="px-3 py-2 tabular-nums">{r.agentic.COMPLIANT}</td>
-              <td className="px-3 py-2 tabular-nums">{r.agentic.MINOR_ISSUE}</td>
-              <td className="px-3 py-2 tabular-nums">{r.agentic.MAJOR_ISSUE}</td>
-              <td className="px-3 py-2 tabular-nums">{r.agentic.CRITICAL}</td>
+              <td className="px-3 py-2 tabular-nums">{r.agentic.NOT_FULLY_COMPLIANT}</td>
               <td className="px-3 py-2 tabular-nums">{r.agenticComplianceRate !== null ? `${(r.agenticComplianceRate * 100).toFixed(0)}%` : "—"}</td>
             </tr>
           ))}

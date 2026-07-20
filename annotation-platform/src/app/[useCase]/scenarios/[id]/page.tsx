@@ -3,7 +3,7 @@ import Link from "next/link";
 import { getRecordByIdForDataset, USE_CASES } from "@/lib/adapters";
 import { resolveDatasetIdParam } from "@/lib/datasetSelection";
 import type { UseCase, PolicyVariant, JudgePass, AgenticPass } from "@/lib/types";
-import { ScoreBar, ValidBadge, VerdictBadge } from "@/lib/ui/badges";
+import { VerdictBadge } from "@/lib/ui/badges";
 import { listAnnotations, listCodebookCodes, listCodeApplications } from "@/lib/db/queries";
 import { AnnotationForm } from "./AnnotationForm";
 import { QualitativeCodingForm } from "./QualitativeCodingForm";
@@ -236,14 +236,15 @@ export default async function ScenarioDetailPage({
 
 function JudgePanel({ title, pass, agentic }: { title: string; pass: JudgePass | AgenticPass; agentic?: boolean }) {
   const ag = agentic ? (pass as AgenticPass) : null;
+  const compliantCount = pass.criteriaVerdicts.filter((c) => c.verdict === "COMPLIANT").length;
+  const total = pass.criteriaVerdicts.length;
   return (
     <div className="rounded-md border border-slate-200 bg-white p-4 flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-sm">{title}</h3>
-        <div className="flex items-center gap-2">
-          <ValidBadge valid={pass.valid} />
-          <ScoreBar score={pass.score} />
-        </div>
+        {total > 0 && (
+          <span className="text-xs text-slate-500 tabular-nums">{compliantCount}/{total} compliant</span>
+        )}
       </div>
       {ag && (
         <div className="text-xs text-slate-500">
