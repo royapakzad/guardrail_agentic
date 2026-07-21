@@ -3,13 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Annotation, CodeApplicationWithCode } from "@/lib/db/queries";
-import {
-  CONFIDENCE_LEVELS,
-  DEDUCTION_REASON_CATEGORIES,
-  EVIDENCE_SOURCE_TYPES,
-  CODING_TARGET_FIELD_LABELS,
-  type CodingTargetField,
-} from "@/lib/annotationOptions";
+import { CODING_TARGET_FIELD_LABELS, type CodingTargetField } from "@/lib/annotationOptions";
 
 type Props = {
   annotatorName: string;
@@ -73,12 +67,9 @@ function AnnotationSection({ annotation }: { annotation: Annotation }) {
         body: JSON.stringify({
           agreesWithVerdict: agreesRaw === "" ? null : agreesRaw === "true",
           disagreementReason: form.get("disagreementReason") || null,
-          evidenceSourceType: form.get("evidenceSourceType") || null,
-          deductionReasonCategory: form.get("deductionReasonCategory") || null,
           evidentiaryAttributionPresent:
             form.get("evidentiaryAttributionPresent") === "" ? null : form.get("evidentiaryAttributionPresent") === "true",
           freeText: form.get("freeText") || null,
-          confidence: form.get("confidence") || null,
         }),
       });
       if (!res.ok) {
@@ -131,26 +122,6 @@ function AnnotationSection({ annotation }: { annotation: Annotation }) {
           <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">If you disagree, why?</label>
           <input name="disagreementReason" defaultValue={annotation.disagreement_reason ?? ""} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Evidence source type</label>
-            <select name="evidenceSourceType" defaultValue={annotation.evidence_source_type ?? ""} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
-              <option value="">—</option>
-              {EVIDENCE_SOURCE_TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Deduction reason category</label>
-            <select name="deductionReasonCategory" defaultValue={annotation.deduction_reason_category ?? ""} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
-              <option value="">—</option>
-              {DEDUCTION_REASON_CATEGORIES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </div>
-        </div>
         <fieldset>
           <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Evidentiary attribution present?</legend>
           <div className="flex gap-4 text-sm">
@@ -168,15 +139,6 @@ function AnnotationSection({ annotation }: { annotation: Annotation }) {
         <div>
           <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Free-text observations</label>
           <textarea name="freeText" defaultValue={annotation.free_text ?? ""} rows={3} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Confidence</label>
-          <select name="confidence" defaultValue={annotation.confidence ?? ""} className="w-full max-w-xs rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
-            <option value="">—</option>
-            {CONFIDENCE_LEVELS.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
         </div>
         <div className="flex items-center gap-2">
           <button type="submit" disabled={status === "submitting"} className="rounded bg-slate-900 px-3 py-1 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300">
