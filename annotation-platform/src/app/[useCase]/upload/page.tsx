@@ -24,8 +24,8 @@ export default async function UploadPage({
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight capitalize">Upload a {useCase} run</h1>
-        <p className="mt-1 text-sm text-slate-600">
+        <h1 className="text-2xl font-semibold tracking-tight capitalize dark:text-slate-100">Upload a {useCase} run</h1>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
           <Link href={`/${useCase}`} className="underline">back to dashboard</Link>
         </p>
       </div>

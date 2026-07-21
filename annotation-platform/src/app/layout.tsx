@@ -28,17 +28,17 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-slate-50 text-slate-900">
-        <header className="border-b border-slate-200 bg-white">
+      <body className="min-h-full flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+        <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
           <div className="mx-auto max-w-6xl px-6 py-3 flex items-center gap-6">
             <Link href="/" className="font-semibold tracking-tight">
               Guardrail Annotation Platform
             </Link>
-            <nav className="flex gap-4 text-sm text-slate-600">
-              <Link href="/humanitarian" className="hover:text-slate-900">Humanitarian</Link>
-              <Link href="/financial" className="hover:text-slate-900">Financial</Link>
-              <Link href="/cybersecurity" className="hover:text-slate-900">Cybersecurity</Link>
-              <Link href="/compare" className="hover:text-slate-900">Compare</Link>
+            <nav className="flex gap-4 text-sm text-slate-600 dark:text-slate-400">
+              <Link href="/humanitarian" className="hover:text-slate-900 dark:hover:text-slate-100">Humanitarian</Link>
+              <Link href="/financial" className="hover:text-slate-900 dark:hover:text-slate-100">Financial</Link>
+              <Link href="/cybersecurity" className="hover:text-slate-900 dark:hover:text-slate-100">Cybersecurity</Link>
+              <Link href="/compare" className="hover:text-slate-900 dark:hover:text-slate-100">Compare</Link>
             </nav>
           </div>
         </header>

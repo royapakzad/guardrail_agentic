@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { USE_CASES, getRecordsForDataset, SEED_DATASET_ID } from "@/lib/adapters";
+import { USE_CASES, getRecordsForDataset } from "@/lib/adapters";
 import { resolveDatasetIdParam } from "@/lib/datasetSelection";
 import { listDatasets, listCodeApplicationsForUseCase } from "@/lib/db/queries";
 import { DatasetPicker } from "@/lib/ui/DatasetPicker";
@@ -80,22 +80,26 @@ export default async function UseCaseDashboard({
 
       <div className="flex items-baseline justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight capitalize">{useCase} dashboard</h1>
-          <p className="mt-1 text-sm text-slate-600">
+          <h1 className="text-2xl font-semibold tracking-tight capitalize dark:text-slate-100">{useCase} dashboard</h1>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
             {records.length} scenarios · {labels.length} policy variants
           </p>
         </div>
         <DatasetPicker useCase={useCase} datasets={availableDatasets} currentId={String(datasetId)} basePath={`/${useCase}`} />
       </div>
 
-      {records.length < 10 && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Small sample ({records.length} scenario{records.length === 1 ? "" : "s"}) — numbers below are not
-          statistically meaningful yet.{" "}
-          {datasetId === SEED_DATASET_ID
-            ? "This is the bundled sample — upload a full batch run above for real numbers."
-            : "This uploaded run is small — consider uploading a larger batch."}
+      {records.length === 0 ? (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+          No scenarios yet for this use case — upload a batch run above to see dashboards, or check the{" "}
+          <Link href={`/${useCase}/help`} className="underline">help page</Link> for how it works.
         </div>
+      ) : (
+        records.length < 10 && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+            Small sample ({records.length} scenario{records.length === 1 ? "" : "s"}) — numbers below are not
+            statistically meaningful yet. Consider uploading a larger batch.
+          </div>
+        )
       )}
 
       <Section title="Score deltas (non-agentic → agentic/merged)">
@@ -120,8 +124,8 @@ export default async function UseCaseDashboard({
       >
         <div className="flex flex-col gap-4">
           {complianceByCriterion.map((c) => (
-            <details key={c.label} className="rounded-md border border-slate-200 bg-white" open={complianceByCriterion.length === 1}>
-              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 bg-slate-50">{c.label}</summary>
+            <details key={c.label} className="rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900" open={complianceByCriterion.length === 1}>
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 bg-slate-50 dark:bg-slate-800 dark:text-slate-300">{c.label}</summary>
               <div className="p-2">
                 <ComplianceTable rows={c.rows} />
               </div>
@@ -151,8 +155,8 @@ export default async function UseCaseDashboard({
       >
         <div className="flex flex-col gap-4">
           {criterionFlips.map((c) => (
-            <details key={c.label} className="rounded-md border border-slate-200 bg-white" open={criterionFlips.length === 1}>
-              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 bg-slate-50">{c.label}</summary>
+            <details key={c.label} className="rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900" open={criterionFlips.length === 1}>
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 bg-slate-50 dark:bg-slate-800 dark:text-slate-300">{c.label}</summary>
               <div className="p-2">
                 <Table
                   columns={["Criterion", "n", "Flipped", "Flip rate", "Transitions"]}
@@ -189,20 +193,20 @@ export default async function UseCaseDashboard({
       >
         <div className="flex flex-col gap-4">
           {domainUsage.map((d) => (
-            <details key={d.label} className="rounded-md border border-slate-200 bg-white" open={domainUsage.length === 1}>
-              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 bg-slate-50">
+            <details key={d.label} className="rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900" open={domainUsage.length === 1}>
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 bg-slate-50 dark:bg-slate-800 dark:text-slate-300">
                 {d.label}{" "}
-                <span className="font-normal text-slate-400">
+                <span className="font-normal text-slate-400 dark:text-slate-500">
                   ({d.totalUrlCount} URL touches · {d.distinctUrlCount} distinct URLs · {d.distinctDomainCount} distinct domains)
                 </span>
               </summary>
               <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">Search result domains</h3>
+                  <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Search result domains</h3>
                   <BarChart data={d.searchDomains.map((c) => ({ label: c.domain, value: c.count }))} unitLabel="results" />
                 </div>
                 <div>
-                  <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">All domains (every tool call)</h3>
+                  <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">All domains (every tool call)</h3>
                   <BarChart data={d.allDomains.map((c) => ({ label: c.domain, value: c.count }))} unitLabel="occurrences" />
                 </div>
               </div>
@@ -276,7 +280,7 @@ export default async function UseCaseDashboard({
       <Section title={`Language flips (en vs. ${languageFlips?.otherLanguage ?? "—"})`}>
         {languageFlips ? (
           <div className="flex flex-col gap-3">
-            <div className="text-sm text-slate-700">
+            <div className="text-sm text-slate-700 dark:text-slate-300">
               {languageFlips.pairedScenarioCount} paired scenario/model combinations · mean |Δ|{" "}
               {languageFlips.meanAbsDelta ?? "—"} · {languageFlips.flippedCount} valid/invalid disagreements (
               {languageFlips.flipRate !== null ? `${(languageFlips.flipRate * 100).toFixed(0)}%` : "—"})
@@ -295,7 +299,7 @@ export default async function UseCaseDashboard({
             />
           </div>
         ) : (
-          <p className="text-sm text-slate-500">No paired second language configured/available for this use case.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">No paired second language configured/available for this use case.</p>
         )}
       </Section>
 
@@ -318,8 +322,8 @@ function Section({ title, note, children }: { title: string; note?: React.ReactN
   return (
     <section className="flex flex-col gap-2">
       <div>
-        <h2 className="text-lg font-semibold">{title}</h2>
-        {note && <p className="text-xs text-slate-500 mt-0.5">{note}</p>}
+        <h2 className="text-lg font-semibold dark:text-slate-100">{title}</h2>
+        {note && <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{note}</p>}
       </div>
       {children}
     </section>
@@ -328,15 +332,15 @@ function Section({ title, note, children }: { title: string; note?: React.ReactN
 
 function Table({ columns, rows }: { columns: string[]; rows: (string | number)[][] }) {
   if (rows.length === 0) {
-    return <p className="text-sm text-slate-400">No data.</p>;
+    return <p className="text-sm text-slate-400 dark:text-slate-500">No data.</p>;
   }
   return (
-    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-slate-200 bg-slate-50 text-left">
+          <tr className="border-b border-slate-200 bg-slate-50 text-left dark:border-slate-700 dark:bg-slate-800">
             {columns.map((c) => (
-              <th key={c} className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap">
+              <th key={c} className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap dark:text-slate-400">
                 {c}
               </th>
             ))}
@@ -344,7 +348,7 @@ function Table({ columns, rows }: { columns: string[]; rows: (string | number)[]
         </thead>
         <tbody>
           {rows.map((row, i) => (
-            <tr key={i} className="border-b border-slate-100 last:border-0">
+            <tr key={i} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
               {row.map((cell, j) => (
                 <td key={j} className="px-3 py-2 tabular-nums whitespace-nowrap max-w-xs truncate" title={String(cell)}>
                   {cell}
@@ -360,19 +364,19 @@ function Table({ columns, rows }: { columns: string[]; rows: (string | number)[]
 
 function ComplianceTable({ rows }: { rows: CriterionComplianceRow[] }) {
   if (rows.length === 0) {
-    return <p className="text-sm text-slate-400 px-2 py-1">No criteria_verdicts data for this policy variant.</p>;
+    return <p className="text-sm text-slate-400 dark:text-slate-500 px-2 py-1">No criteria_verdicts data for this policy variant.</p>;
   }
   return (
-    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-slate-200 bg-slate-50 text-left">
-            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Criterion</th>
-            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Tool-tagged</th>
-            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap" colSpan={3}>Non-agentic</th>
-            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap" colSpan={3}>Agentic / final</th>
+          <tr className="border-b border-slate-200 bg-slate-50 text-left dark:border-slate-700 dark:bg-slate-800">
+            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap dark:text-slate-400">Criterion</th>
+            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap dark:text-slate-400">Tool-tagged</th>
+            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap dark:text-slate-400" colSpan={3}>Non-agentic</th>
+            <th className="px-3 py-2 font-medium text-slate-600 whitespace-nowrap dark:text-slate-400" colSpan={3}>Agentic / final</th>
           </tr>
-          <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
+          <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
             <th className="px-3 py-1"></th>
             <th className="px-3 py-1"></th>
             <th className="px-3 py-1 whitespace-nowrap">Compliant</th>
@@ -385,13 +389,13 @@ function ComplianceTable({ rows }: { rows: CriterionComplianceRow[] }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.criterion} className="border-b border-slate-100 last:border-0">
+            <tr key={r.criterion} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
               <td className="px-3 py-2 max-w-xs truncate" title={r.criterion}>{r.criterion}</td>
               <td className="px-3 py-2">
                 {r.toolTagged ? (
-                  <span className="inline-block rounded-full bg-sky-100 text-sky-800 px-2 py-0.5 text-xs font-medium">tool</span>
+                  <span className="inline-block rounded-full bg-sky-100 text-sky-800 px-2 py-0.5 text-xs font-medium dark:bg-sky-950/50 dark:text-sky-300">tool</span>
                 ) : (
-                  <span className="text-slate-300 text-xs">—</span>
+                  <span className="text-slate-300 dark:text-slate-600 text-xs">—</span>
                 )}
               </td>
               <td className="px-3 py-2 tabular-nums">{r.nonagentic.COMPLIANT}</td>
