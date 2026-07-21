@@ -48,46 +48,46 @@ export function CodebookForm({ useCase }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-md border border-violet-200 bg-violet-50/40 p-4">
-      <h3 className="text-sm font-semibold text-slate-800">Add a code</h3>
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-md border border-violet-200 bg-violet-50/40 p-4 dark:border-violet-800 dark:bg-violet-950/20">
+      <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Add a code</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Code name</label>
-          <input name="name" required className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Code name</label>
+          <input name="name" required className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Theme</label>
+          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Theme</label>
           <input
             name="theme"
             placeholder="e.g. Evidence calibration"
-            className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+            className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
           />
         </div>
       </div>
       <div>
-        <label className="block text-xs font-medium text-slate-600 mb-1">
+        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
           Definition (inclusion/exclusion criteria — when does this code apply?)
         </label>
-        <textarea name="definition" required rows={2} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+        <textarea name="definition" required rows={2} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
       </div>
       <div>
-        <label className="block text-xs font-medium text-slate-600 mb-1">Example quote</label>
-        <textarea name="exampleQuote" rows={2} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Example quote</label>
+        <textarea name="exampleQuote" rows={2} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
       </div>
       <div>
-        <label className="block text-xs font-medium text-slate-600 mb-1">Your name</label>
-        <input name="createdBy" required className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Your name</label>
+        <input name="createdBy" required className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
       </div>
       <div className="flex items-center gap-3">
         <button
           type="submit"
           disabled={status === "submitting"}
-          className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+          className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
         >
           {status === "submitting" ? "Saving…" : "Add code"}
         </button>
-        {status === "done" && <span className="text-sm font-medium text-emerald-700">✓ Code added</span>}
-        {status === "error" && <span className="text-sm text-red-700">{errorMessage}</span>}
+        {status === "done" && <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">✓ Code added</span>}
+        {status === "error" && <span className="text-sm text-red-700 dark:text-red-400">{errorMessage}</span>}
       </div>
     </form>
   );

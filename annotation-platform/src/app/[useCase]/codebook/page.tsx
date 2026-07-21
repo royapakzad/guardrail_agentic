@@ -39,8 +39,8 @@ export default async function CodebookPage({ params }: { params: Promise<{ useCa
       <UseCaseNav useCase={useCase} />
 
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight capitalize">{useCase} codebook</h1>
-        <p className="mt-1 text-sm text-slate-600">
+        <h1 className="text-2xl font-semibold tracking-tight capitalize dark:text-slate-100">{useCase} codebook</h1>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
           The shared, evolving codebook for qualitative/thematic coding of this use case&apos;s scenarios —{" "}
           <Link href={`/${useCase}/scenarios`} className="underline">browse scenarios &amp; apply codes</Link>, or read the{" "}
           <Link href={`/${useCase}/help`} className="underline">help guide</Link> for how coding works here.
@@ -50,7 +50,7 @@ export default async function CodebookPage({ params }: { params: Promise<{ useCa
       </div>
 
       {dbError ? (
-        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-300 rounded px-3 py-2">
+        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-300 rounded px-3 py-2 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
           Could not load codebook: {dbError}
         </p>
       ) : (

@@ -13,11 +13,19 @@
 }
 
 /*
- * No dark-mode variant is maintained for this app's hand-built components
- * (badges, cards, charts all assume the slate-on-white palette below), so we
- * don't flip --background/--foreground on prefers-color-scheme: dark -- that
- * previously left every component readable but the page shell inverted.
+ * Without an explicit color-scheme, browsers apply their own dark native
+ * widget chrome (inputs, selects, scrollbars) whenever the OS is in dark
+ * mode -- even though every component here is styled with light-only
+ * Tailwind classes with no `dark:` counterpart, producing dark input/select
+ * boxes with inherited near-black text (illegible). `light dark` tells the
+ * browser both are supported so it renders native controls to match
+ * whichever `dark:` classes are actually present on the page instead of
+ * silently overriding them.
  */
+:root {
+  color-scheme: light dark;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

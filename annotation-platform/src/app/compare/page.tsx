@@ -19,12 +19,12 @@ import {
 // — the most directly comparable "headline" number, rather than mixing in the
 // shared policy_generic fallback or a GPT-judged duplicate run. Falls back to
 // whichever variant has the most records if this exact label isn't in the
-// currently selected dataset (e.g. a freshly uploaded run may not reuse the
-// exact same policy/model naming as the bundled sample).
+// currently selected dataset (e.g. a freshly uploaded run may use a
+// differently named policy file).
 const PRIMARY_LABEL: Record<UseCase, string> = {
-  humanitarian: "humanitarian_policy_explicit_claude_sonnet_4_6",
+  humanitarian: "humanitarian_policy_explicit",
   financial: "financial_policy",
-  cybersecurity: "policy_policy_cybersecurity[anthropic:claude-sonnet-4-6]",
+  cybersecurity: "policy_cybersecurity_explicit",
 };
 
 function pickLabel(scoreDeltas: ScoreDeltaSummary[], preferred: string): string | undefined {
@@ -53,37 +53,42 @@ export default async function ComparePage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Cross-use-case comparison</h1>
-        <p className="mt-1 text-sm text-slate-600 max-w-2xl">
-          Each use case&apos;s most recently uploaded dataset (or the bundled sample if none has been
-          uploaded yet), one representative policy variant per use case — see each use case&apos;s own
-          dashboard to pick a different dataset or see the full breakdown across all policy variants.
+        <h1 className="text-2xl font-semibold tracking-tight dark:text-slate-100">Cross-use-case comparison</h1>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400 max-w-2xl">
+          Each use case&apos;s most recently uploaded dataset, one representative policy variant per use
+          case — see each use case&apos;s own dashboard to pick a different dataset or see the full
+          breakdown across all policy variants.
         </p>
       </div>
 
-      {rows.some((r) => r.n < 10) && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+      {rows.some((r) => r.n === 0) && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+          {rows.filter((r) => r.n === 0).map((r) => r.useCase).join(", ")} — no batch run uploaded yet.
+        </div>
+      )}
+      {rows.some((r) => r.n > 0 && r.n < 10) && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
           {rows
-            .filter((r) => r.n < 10)
+            .filter((r) => r.n > 0 && r.n < 10)
             .map((r) => `${r.useCase} (n=${r.n})`)
             .join(", ")}{" "}
           — small sample, not comparable in scale to the others yet.
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+      <div className="overflow-x-auto rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50 text-left">
-              <th className="px-3 py-2 font-medium text-slate-600">Metric</th>
+            <tr className="border-b border-slate-200 bg-slate-50 text-left dark:border-slate-700 dark:bg-slate-800">
+              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Metric</th>
               {rows.map((r) => (
-                <th key={r.useCase} className="px-3 py-2 font-medium text-slate-600 capitalize whitespace-nowrap">
-                  {r.useCase} <span className="text-slate-400 font-normal">(n={r.n})</span>
+                <th key={r.useCase} className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 capitalize whitespace-nowrap">
+                  {r.useCase} <span className="text-slate-400 dark:text-slate-500 font-normal">(n={r.n})</span>
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="[&>tr]:border-b [&>tr]:border-slate-100 [&>tr:last-child]:border-0">
+          <tbody className="[&>tr]:border-b [&>tr]:border-slate-100 [&>tr:last-child]:border-0 dark:[&>tr]:border-slate-800">
             <MetricRow label="Mean score Δ" rows={rows} get={(r) => r.scoreDelta?.meanDelta} />
             <MetricRow label="Mean |Δ|" rows={rows} get={(r) => r.scoreDelta?.meanAbsDelta} />
             <MetricRow label="Harsher / Lenient / Unchanged" rows={rows} get={(r) => r.scoreDelta && `${r.scoreDelta.harsherCount} / ${r.scoreDelta.lenientCount} / ${r.scoreDelta.unchangedCount}`} />
@@ -111,7 +116,7 @@ function MetricRow<T extends { useCase: UseCase }>({
 }) {
   return (
     <tr>
-      <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{label}</td>
+      <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">{label}</td>
       {rows.map((r) => {
         const v = get(r);
         return (

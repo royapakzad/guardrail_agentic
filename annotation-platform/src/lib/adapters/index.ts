@@ -1,6 +1,4 @@
 import "server-only";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import type { EvaluationRecord, UseCase } from "@/lib/types";
 import { adaptHumanitarian } from "./humanitarian";
 import { adaptFinancial } from "./financial";
@@ -10,8 +8,6 @@ import { SEED_DATASET_ID, type DatasetId } from "@/lib/datasetId";
 
 export { SEED_DATASET_ID, type DatasetId } from "@/lib/datasetId";
 
-const DATA_DIR = path.join(process.cwd(), "data");
-
 const ADAPTERS: Record<UseCase, (raw: unknown) => EvaluationRecord[]> = {
   humanitarian: adaptHumanitarian,
   financial: adaptFinancial,
@@ -20,10 +16,12 @@ const ADAPTERS: Record<UseCase, (raw: unknown) => EvaluationRecord[]> = {
 
 export const USE_CASES: UseCase[] = ["humanitarian", "financial", "cybersecurity"];
 
-function loadSeedRecords(useCase: UseCase): EvaluationRecord[] {
-  const filePath = path.join(DATA_DIR, useCase, "results.json");
-  const raw = JSON.parse(readFileSync(filePath, "utf-8"));
-  return ADAPTERS[useCase](raw);
+// No bundled sample data ships with the app -- every use case starts empty
+// until a real batch run is uploaded. SEED_DATASET_ID is kept as the "no
+// dataset selected yet" sentinel (see datasetSelection.ts) so an unset
+// ?dataset= param still resolves to something rather than throwing.
+function loadSeedRecords(): EvaluationRecord[] {
+  return [];
 }
 
 /** Runs raw JSON through the right use case's adapter — used both by the seed
@@ -48,7 +46,7 @@ export async function getRecordsForDataset(useCase: UseCase, datasetId: DatasetI
 
   let records: EvaluationRecord[];
   if (datasetId === SEED_DATASET_ID) {
-    records = loadSeedRecords(useCase);
+    records = loadSeedRecords();
   } else {
     const dataset = await getDataset(datasetId);
     if (!dataset || dataset.use_case !== useCase) {

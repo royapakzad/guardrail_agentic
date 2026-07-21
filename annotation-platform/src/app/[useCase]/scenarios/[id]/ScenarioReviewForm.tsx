@@ -177,17 +177,17 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-6 rounded-md border border-slate-200 bg-white p-5">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-6 rounded-md border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
       <div>
-        <label className="block text-xs font-medium text-slate-600 mb-1">Your name</label>
-        <input name="annotatorName" required className="w-full max-w-xs rounded border border-slate-300 px-2 py-1.5 text-sm" />
+        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Your name</label>
+        <input name="annotatorName" required className="w-full max-w-xs rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
       </div>
 
       <div className="flex flex-col gap-4">
-        <h3 className="text-sm font-semibold text-slate-800">Your structured judgment</h3>
+        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Your structured judgment</h3>
 
         <fieldset>
-          <legend className="text-xs font-medium text-slate-600 mb-1">Do you agree with the system&apos;s final verdict?</legend>
+          <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Do you agree with the system&apos;s final verdict?</legend>
           <div className="flex gap-4 text-sm">
             <label className="flex items-center gap-1.5">
               <input type="radio" name="agreesWithVerdict" value="true" /> Agree
@@ -202,14 +202,14 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
         </fieldset>
 
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">If you disagree, why?</label>
-          <input name="disagreementReason" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">If you disagree, why?</label>
+          <input name="disagreementReason" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Evidence source type</label>
-            <select name="evidenceSourceType" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Evidence source type</label>
+            <select name="evidenceSourceType" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
               <option value="">—</option>
               {EVIDENCE_SOURCE_TYPES.map((t) => (
                 <option key={t} value={t}>{t}</option>
@@ -217,8 +217,8 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Deduction reason category</label>
-            <select name="deductionReasonCategory" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Deduction reason category</label>
+            <select name="deductionReasonCategory" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
               <option value="">—</option>
               {DEDUCTION_REASON_CATEGORIES.map((t) => (
                 <option key={t} value={t}>{t}</option>
@@ -228,7 +228,7 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
         </div>
 
         <fieldset>
-          <legend className="text-xs font-medium text-slate-600 mb-1">
+          <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
             Does every evidentiary claim in the explanation have a matching tool call in the log?
           </legend>
           <div className="flex gap-4 text-sm">
@@ -245,13 +245,13 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
         </fieldset>
 
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Free-text observations</label>
-          <textarea name="freeText" rows={3} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Free-text observations</label>
+          <textarea name="freeText" rows={3} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Your confidence in this review</label>
-          <select name="confidence" className="w-full max-w-xs rounded border border-slate-300 px-2 py-1.5 text-sm">
+          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Your confidence in this review</label>
+          <select name="confidence" className="w-full max-w-xs rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
             <option value="">—</option>
             {CONFIDENCE_LEVELS.map((c) => (
               <option key={c} value={c}>{c}</option>
@@ -260,10 +260,10 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 rounded-md border border-violet-200 bg-violet-50/40 p-4">
+      <div className="flex flex-col gap-3 rounded-md border border-violet-200 bg-violet-50/40 p-4 dark:border-violet-800 dark:bg-violet-950/20">
         <div>
-          <h3 className="text-sm font-semibold text-violet-900">Qualitative codes</h3>
-          <p className="text-xs text-violet-800/80 mt-0.5">
+          <h3 className="text-sm font-semibold text-violet-900 dark:text-violet-300">Qualitative codes</h3>
+          <p className="text-xs text-violet-800/80 dark:text-violet-300/80 mt-0.5">
             Apply one or more codes from the codebook to specific text in this scenario. Don&apos;t see the right code?
             Choose &ldquo;+ Add a new code&rdquo; below to create one without leaving this page.
           </p>
@@ -283,7 +283,7 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
         <button
           type="button"
           onClick={addRow}
-          className="self-start rounded-full border border-violet-300 px-3 py-1 text-xs font-medium text-violet-800 hover:bg-violet-100"
+          className="self-start rounded-full border border-violet-300 px-3 py-1 text-xs font-medium text-violet-800 hover:bg-violet-100 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/40"
         >
           + Add another code
         </button>
@@ -297,8 +297,8 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
         >
           {status === "submitting" ? "Saving…" : "Save review"}
         </button>
-        {status === "done" && <span className="text-sm font-medium text-emerald-700">✓ Saved — see it below</span>}
-        {status === "error" && <span className="text-sm text-red-700">{errorMessage}</span>}
+        {status === "done" && <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">✓ Saved — see it below</span>}
+        {status === "error" && <span className="text-sm text-red-700 dark:text-red-400">{errorMessage}</span>}
       </div>
     </form>
   );
@@ -326,14 +326,14 @@ function CodeRowFields({
   }
 
   return (
-    <div className="rounded border border-violet-200 bg-white p-3 flex flex-col gap-2">
+    <div className="rounded border border-violet-200 bg-white p-3 flex flex-col gap-2 dark:border-violet-800 dark:bg-slate-900">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Code</label>
+          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Code</label>
           <select
             value={row.addingNew ? NEW_CODE_VALUE : row.codeId}
             onChange={(e) => handleCodeSelect(e.target.value)}
-            className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+            className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
           >
             <option value="">— none for this row —</option>
             {codes.map((c) => (
@@ -345,11 +345,11 @@ function CodeRowFields({
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Which text is this coding?</label>
+          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Which text is this coding?</label>
           <select
             value={row.targetField}
             onChange={(e) => onChange({ targetField: e.target.value })}
-            className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+            className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
           >
             <option value="">—</option>
             {CODING_TARGET_FIELDS.map((f) => (
@@ -360,19 +360,19 @@ function CodeRowFields({
       </div>
 
       {row.addingNew && (
-        <div className="rounded border border-violet-300 bg-violet-50 p-2 flex flex-col gap-2">
+        <div className="rounded border border-violet-300 bg-violet-50 p-2 flex flex-col gap-2 dark:border-violet-700 dark:bg-violet-950/30">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             <input
               placeholder="New code name"
               value={row.newName}
               onChange={(e) => onChange({ newName: e.target.value })}
-              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
             />
             <input
               placeholder="Theme (optional)"
               value={row.newTheme}
               onChange={(e) => onChange({ newTheme: e.target.value })}
-              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
             />
           </div>
           <textarea
@@ -380,42 +380,42 @@ function CodeRowFields({
             value={row.newDefinition}
             onChange={(e) => onChange({ newDefinition: e.target.value })}
             rows={2}
-            className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+            className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
           />
           <textarea
             placeholder="Example quote (optional)"
             value={row.newExampleQuote}
             onChange={(e) => onChange({ newExampleQuote: e.target.value })}
             rows={2}
-            className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+            className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
           />
-          <p className="text-xs text-violet-800/80">
+          <p className="text-xs text-violet-800/80 dark:text-violet-300/80">
             This code is created when you click &ldquo;Save review&rdquo; below.
           </p>
         </div>
       )}
 
       <div>
-        <label className="block text-xs font-medium text-slate-600 mb-1">Quote (paste the specific text this code applies to)</label>
+        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Quote (paste the specific text this code applies to)</label>
         <textarea
           value={row.quoteText}
           onChange={(e) => onChange({ quoteText: e.target.value })}
           rows={2}
-          className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+          className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
         />
       </div>
       <div>
-        <label className="block text-xs font-medium text-slate-600 mb-1">Note</label>
+        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Note</label>
         <textarea
           value={row.note}
           onChange={(e) => onChange({ note: e.target.value })}
           rows={2}
-          className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+          className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
         />
       </div>
 
       {showRemove && (
-        <button type="button" onClick={onRemove} className="self-start text-xs text-red-700 underline">
+        <button type="button" onClick={onRemove} className="self-start text-xs text-red-700 dark:text-red-400 underline">
           Remove this code row
         </button>
       )}

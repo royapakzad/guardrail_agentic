@@ -26,7 +26,7 @@ export function BarChart({
   const gradientId = useId();
 
   if (data.length === 0) {
-    return <p className="text-sm text-slate-400">No data.</p>;
+    return <p className="text-sm text-slate-400 dark:text-slate-500">No data.</p>;
   }
 
   const sorted = [...data].sort((a, b) => b.value - a.value);
@@ -69,7 +69,7 @@ export function BarChart({
                 y={y + barHeight / 2}
                 textAnchor="end"
                 dominantBaseline="middle"
-                className="fill-slate-600"
+                className="fill-slate-600 dark:fill-slate-300"
                 fontSize="11"
               >
                 {d.label.length > 22 ? `${d.label.slice(0, 21)}…` : d.label}
@@ -86,7 +86,7 @@ export function BarChart({
                 x={labelWidth + w + 6}
                 y={y + barHeight / 2}
                 dominantBaseline="middle"
-                className="fill-slate-500 tabular-nums"
+                className="fill-slate-500 dark:fill-slate-400 tabular-nums"
                 fontSize="11"
               >
                 {d.value.toLocaleString()}
@@ -98,22 +98,22 @@ export function BarChart({
       <button
         type="button"
         onClick={() => setShowTable((v) => !v)}
-        className="self-start text-xs text-sky-700 underline"
+        className="self-start text-xs text-sky-700 dark:text-sky-400 underline"
       >
         {showTable ? "Hide table view" : "Show as table"}
       </button>
       {showTable && (
-        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left">
-                <th className="px-3 py-1.5 font-medium text-slate-600">Label</th>
-                <th className="px-3 py-1.5 font-medium text-slate-600">{unitLabel}</th>
+              <tr className="border-b border-slate-200 bg-slate-50 text-left dark:border-slate-700 dark:bg-slate-800">
+                <th className="px-3 py-1.5 font-medium text-slate-600 dark:text-slate-300">Label</th>
+                <th className="px-3 py-1.5 font-medium text-slate-600 dark:text-slate-300">{unitLabel}</th>
               </tr>
             </thead>
             <tbody>
               {sorted.map((d) => (
-                <tr key={d.label} className="border-b border-slate-100 last:border-0">
+                <tr key={d.label} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
                   <td className="px-3 py-1 max-w-xs truncate" title={d.label}>{d.label}</td>
                   <td className="px-3 py-1 tabular-nums">{d.value.toLocaleString()}</td>
                 </tr>

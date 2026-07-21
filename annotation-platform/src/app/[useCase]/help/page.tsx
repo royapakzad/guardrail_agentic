@@ -22,8 +22,8 @@ export default async function HelpPage({ params }: { params: Promise<{ useCase: 
       <UseCaseNav useCase={useCase} />
 
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight capitalize">{useCase} help</h1>
-        <p className="mt-1 text-sm text-slate-600">
+        <h1 className="text-2xl font-semibold tracking-tight capitalize dark:text-slate-100">{useCase} help</h1>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
           What this platform is for, and how to review a scenario end to end.
         </p>
       </div>
@@ -37,7 +37,7 @@ export default async function HelpPage({ params }: { params: Promise<{ useCase: 
           ["dashboard", "The dashboard"],
           ["export", "Exporting your data"],
         ].map(([href, label]) => (
-          <a key={href} href={`#${href}`} className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700 hover:bg-slate-200">
+          <a key={href} href={`#${href}`} className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">
             {label}
           </a>
         ))}
@@ -133,8 +133,8 @@ export default async function HelpPage({ params }: { params: Promise<{ useCase: 
 function HelpSection({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
     <section id={id} className="flex flex-col gap-3 scroll-mt-4">
-      <h2 className="text-lg font-semibold text-slate-900 border-b border-slate-200 pb-2">{title}</h2>
-      <div className="flex flex-col gap-3 text-sm text-slate-700 leading-relaxed">{children}</div>
+      <h2 className="text-lg font-semibold text-slate-900 border-b border-slate-200 pb-2 dark:text-slate-100 dark:border-slate-700">{title}</h2>
+      <div className="flex flex-col gap-3 text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{children}</div>
     </section>
   );
 }
