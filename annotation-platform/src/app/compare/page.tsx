@@ -9,10 +9,9 @@ import type { UseCase } from "@/lib/types";
 import {
   computeFlipRate,
   computeLatency,
-  computeScoreDeltas,
   computeToolSelectionConsistency,
   computeToolUsage,
-  type ScoreDeltaSummary,
+  type FlipRateSummary,
 } from "@/lib/metrics";
 
 // The domain-specific, Claude-judged policy variant per use case, when present
@@ -27,9 +26,9 @@ const PRIMARY_LABEL: Record<UseCase, string> = {
   cybersecurity: "policy_cybersecurity_explicit",
 };
 
-function pickLabel(scoreDeltas: ScoreDeltaSummary[], preferred: string): string | undefined {
-  if (scoreDeltas.some((s) => s.label === preferred)) return preferred;
-  return [...scoreDeltas].sort((a, b) => b.n - a.n)[0]?.label;
+function pickLabel(flipRates: FlipRateSummary[], preferred: string): string | undefined {
+  if (flipRates.some((f) => f.label === preferred)) return preferred;
+  return [...flipRates].sort((a, b) => b.n - a.n)[0]?.label;
 }
 
 export default async function ComparePage() {
@@ -38,15 +37,14 @@ export default async function ComparePage() {
       const datasetId = await resolveDefaultDatasetId(useCase);
       const records = await getRecordsForDataset(useCase, datasetId);
 
-      const scoreDeltas = computeScoreDeltas(records);
-      const label = pickLabel(scoreDeltas, PRIMARY_LABEL[useCase]);
-      const scoreDelta = scoreDeltas.find((s) => s.label === label);
-      const flip = computeFlipRate(records).find((f) => f.label === label);
+      const flipRates = computeFlipRate(records);
+      const label = pickLabel(flipRates, PRIMARY_LABEL[useCase]);
+      const flip = flipRates.find((f) => f.label === label);
       const tools = computeToolUsage(records).find((t) => t.label === label);
       const selection = computeToolSelectionConsistency(records).find((t) => t.label === label);
       const latency = computeLatency(records).find((l) => l.label === label);
 
-      return { useCase, n: records.length, label, scoreDelta, flip, tools, selection, latency };
+      return { useCase, n: records.length, label, flip, tools, selection, latency };
     })
   );
 
@@ -89,9 +87,6 @@ export default async function ComparePage() {
             </tr>
           </thead>
           <tbody className="[&>tr]:border-b [&>tr]:border-slate-100 [&>tr:last-child]:border-0 dark:[&>tr]:border-slate-800">
-            <MetricRow label="Mean score Δ" rows={rows} get={(r) => r.scoreDelta?.meanDelta} />
-            <MetricRow label="Mean |Δ|" rows={rows} get={(r) => r.scoreDelta?.meanAbsDelta} />
-            <MetricRow label="Harsher / Lenient / Unchanged" rows={rows} get={(r) => r.scoreDelta && `${r.scoreDelta.harsherCount} / ${r.scoreDelta.lenientCount} / ${r.scoreDelta.unchangedCount}`} />
             <MetricRow label="Flip rate" rows={rows} get={(r) => r.flip?.flipRate !== null && r.flip?.flipRate !== undefined ? `${(r.flip.flipRate * 100).toFixed(0)}%` : undefined} />
             <MetricRow label="Mean tool calls/scenario" rows={rows} get={(r) => r.tools?.meanCallsPerScenario} />
             <MetricRow label="Acronym tool-selection consistency" rows={rows} get={(r) => r.selection?.acronymConsistency !== null && r.selection?.acronymConsistency !== undefined ? `${(r.selection.acronymConsistency * 100).toFixed(0)}%` : undefined} />

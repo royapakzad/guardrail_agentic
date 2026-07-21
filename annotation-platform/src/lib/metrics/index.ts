@@ -1,5 +1,3 @@
-export { computeScoreDeltas } from "./scoreDeltas";
-export type { ScoreDeltaSummary } from "./scoreDeltas";
 export { computeFlipRate } from "./flipRate";
 export type { FlipRateSummary } from "./flipRate";
 export { computeToolUsage } from "./toolUsage";

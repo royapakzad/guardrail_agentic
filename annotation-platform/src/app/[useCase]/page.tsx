@@ -15,7 +15,6 @@ import {
   computeFlipRate,
   computeLanguageFlips,
   computeLatency,
-  computeScoreDeltas,
   computeTokenUsage,
   computeToolSelectionConsistency,
   computeToolUsage,
@@ -47,7 +46,6 @@ export default async function UseCaseDashboard({
     getRecordsForDataset(useCase, datasetId),
     listDatasets(useCase).catch(() => []),
   ]);
-  const scoreDeltas = computeScoreDeltas(records);
   const flipRate = computeFlipRate(records);
   const complianceByCriterion = computeComplianceByCriterion(records);
   const criterionFlips = computeCriterionFlips(records);
@@ -72,7 +70,7 @@ export default async function UseCaseDashboard({
     value,
   }));
 
-  const labels = scoreDeltas.map((s) => s.label);
+  const labels = flipRate.map((f) => f.label);
 
   return (
     <div className="flex flex-col gap-8">
@@ -101,22 +99,6 @@ export default async function UseCaseDashboard({
           </div>
         )
       )}
-
-      <Section title="Score deltas (non-agentic → agentic/merged)">
-        <Table
-          columns={["Policy variant", "n", "Mean Δ", "Median Δ", "Mean |Δ|", "Harsher", "Lenient", "Unchanged"]}
-          rows={scoreDeltas.map((s) => [
-            s.label,
-            s.n,
-            s.meanDelta ?? "—",
-            s.medianDelta ?? "—",
-            s.meanAbsDelta ?? "—",
-            s.harsherCount,
-            s.lenientCount,
-            s.unchangedCount,
-          ])}
-        />
-      </Section>
 
       <Section
         title="Compliance by policy criterion"
