@@ -407,6 +407,12 @@ def process_row(
             # calls run concurrently: non-agentic over the full policy, agentic
             # (with tools) over only the tool-requiring criteria subset.
             na_prompt_tokens = _count_tokens(nonagentic_eval_text, model=judge.model)
+            # Only used for the combined _total_judgment_time_s checkpoint
+            # below -- each pass's own judgment_time_s (gr.judgment_time_s /
+            # aj.judgment_time_s) is measured in isolation inside
+            # run_guardrail_for_policy() / run_agentic_guardrail(), since
+            # both run concurrently in run_split_criteria_guardrail's thread
+            # pool and a single wrapping timer here can't separate them.
             _na_start = time.perf_counter()
             na_error: Optional[Exception] = None
             aj: Optional[AgenticJudgment] = None
@@ -438,8 +444,6 @@ def process_row(
                     valid=None, score=None, explanation=f"ERROR: {e}", tool_calls_made=0
                 )
 
-            _na_elapsed = round(time.perf_counter() - _na_start, 3)
-
             if na_error is None:
                 na_completion_tokens = _count_tokens(str(gr.explanation or ""), model=judge.model)
                 na_total_tokens = na_prompt_tokens + na_completion_tokens
@@ -453,7 +457,7 @@ def process_row(
                 out[f"{base}_nonagentic_prompt_tokens"] = na_prompt_tokens
                 out[f"{base}_nonagentic_completion_tokens"] = na_completion_tokens
                 out[f"{base}_nonagentic_total_tokens"] = na_total_tokens
-                out[f"{base}_nonagentic_judgment_time_s"] = _na_elapsed
+                out[f"{base}_nonagentic_judgment_time_s"] = gr.judgment_time_s
                 if logger is not None:
                     logger.log_nonagentic_eval(
                         policy_label=f"{policy_label}[{judge.model_id}]",
@@ -468,8 +472,10 @@ def process_row(
                         total_tokens=na_total_tokens,
                     )
                 if verbose:
-                    print(f"score={gr.score}  valid={gr.valid}  tokens={na_total_tokens:,}  time={_na_elapsed:.2f}s")
-                    print(f"        agentic (tool-subset) score={aj.score}  valid={aj.valid}  time={_na_elapsed:.2f}s (parallel)")
+                    na_time = gr.judgment_time_s
+                    print(f"score={gr.score}  valid={gr.valid}  tokens={na_total_tokens:,}  time={na_time and f'{na_time:.2f}s'}")
+                    ag_time = aj.judgment_time_s
+                    print(f"        agentic (tool-subset) score={aj.score}  valid={aj.valid}  time={ag_time and f'{ag_time:.2f}s'} (concurrent with non-agentic)")
             else:
                 out[f"{base}_nonagentic_valid"] = None
                 out[f"{base}_nonagentic_score"] = None
@@ -477,7 +483,7 @@ def process_row(
                 out[f"{base}_nonagentic_prompt_tokens"] = na_prompt_tokens
                 out[f"{base}_nonagentic_completion_tokens"] = None
                 out[f"{base}_nonagentic_total_tokens"] = na_prompt_tokens
-                out[f"{base}_nonagentic_judgment_time_s"] = _na_elapsed
+                out[f"{base}_nonagentic_judgment_time_s"] = None
                 if logger is not None:
                     logger.log_nonagentic_eval(
                         policy_label=f"{policy_label}[{judge.model_id}]",

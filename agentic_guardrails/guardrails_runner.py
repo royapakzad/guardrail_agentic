@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from typing import List, Optional, Protocol, runtime_checkable
 
@@ -60,6 +61,11 @@ class NonAgenticJudgment:
     criteria_verdicts: list = field(default_factory=list)
     improvements: list = field(default_factory=list)
     claims_to_verify: list = field(default_factory=list)
+    # Wall-clock time for this judgment's own LLM call, isolated from
+    # whatever else happens to be running concurrently alongside it (e.g.
+    # the agentic pass in run_split_criteria_guardrail's thread pool) — see
+    # run_guardrail_for_policy(), which is the only place this gets set.
+    judgment_time_s: Optional[float] = None
 
 
 # ── Shared severity anchors ───────────────────────────────────────────────────
@@ -577,9 +583,12 @@ def run_guardrail_for_policy(
         user_message=user_message,
         assistant_response=assistant_response,
     )
-    return guardrail.evaluate(
+    _start = time.perf_counter()
+    result = guardrail.evaluate(
         eval_text,
         policy_text,
         assistant_response=assistant_response,
         model_id=model_id,
     )
+    result.judgment_time_s = round(time.perf_counter() - _start, 3)
+    return result
