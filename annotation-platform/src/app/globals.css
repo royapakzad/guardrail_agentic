@@ -13,17 +13,17 @@
 }
 
 /*
- * Without an explicit color-scheme, browsers apply their own dark native
- * widget chrome (inputs, selects, scrollbars) whenever the OS is in dark
- * mode -- even though every component here is styled with light-only
- * Tailwind classes with no `dark:` counterpart, producing dark input/select
- * boxes with inherited near-black text (illegible). `light dark` tells the
- * browser both are supported so it renders native controls to match
- * whichever `dark:` classes are actually present on the page instead of
- * silently overriding them.
+ * This app is light-mode only by design. `dark:` utility classes exist
+ * throughout the codebase but are pinned to an `.dark` ancestor class that
+ * is never added anywhere, so they never activate -- the app renders light
+ * regardless of the OS/browser color-scheme preference. `color-scheme: light`
+ * (not `light dark`) also stops the browser from applying its own dark
+ * native widget chrome to inputs/selects when the OS is in dark mode.
  */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 }
 
 body {
