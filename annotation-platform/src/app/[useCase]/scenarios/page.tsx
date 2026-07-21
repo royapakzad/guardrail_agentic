@@ -5,7 +5,7 @@ import { resolveDatasetIdParam } from "@/lib/datasetSelection";
 import { listDatasets } from "@/lib/db/queries";
 import { DatasetPicker } from "@/lib/ui/DatasetPicker";
 import { UseCaseNav } from "@/lib/ui/UseCaseNav";
-import type { UseCase } from "@/lib/types";
+import type { JudgePass, PolicyVariant, UseCase } from "@/lib/types";
 
 function isUseCase(value: string): value is UseCase {
   return (USE_CASES as string[]).includes(value);
@@ -33,6 +33,18 @@ export default async function ScenarioListPage({
     listDatasets(useCase).catch(() => []),
   ]);
 
+  // The full criterion count for a policy should be the same on every
+  // scenario that uses it -- if some record's judge only returned a subset
+  // (a judge parsing/completeness issue, not a policy design difference),
+  // the badge below flags it rather than silently showing a smaller "total".
+  const expectedTotalByLabel = new Map<string, number>();
+  for (const r of records) {
+    for (const v of r.policyVariants) {
+      const n = Math.max(v.nonagentic.criteriaVerdicts.length, v.agentic.criteriaVerdicts.length);
+      expectedTotalByLabel.set(v.label, Math.max(expectedTotalByLabel.get(v.label) ?? 0, n));
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <UseCaseNav useCase={useCase} datasetId={String(datasetId)} />
@@ -52,7 +64,8 @@ export default async function ScenarioListPage({
               <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">ID</th>
               <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Lang</th>
               <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Scenario</th>
-              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Policy variants</th>
+              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Non-agentic</th>
+              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Agentic</th>
             </tr>
           </thead>
           <tbody>
@@ -71,27 +84,55 @@ export default async function ScenarioListPage({
                   {r.scenario}
                 </td>
                 <td className="px-3 py-2">
-                  <div className="flex flex-wrap gap-2">
-                    {r.policyVariants.map((v) => {
-                      const total = v.agentic.criteriaVerdicts.length;
-                      const compliant = v.agentic.criteriaVerdicts.filter((c) => c.verdict === "COMPLIANT").length;
-                      return (
-                        <span
-                          key={v.label}
-                          className="inline-flex items-center gap-1 text-xs rounded-full bg-slate-100 px-2 py-0.5 tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                          title={v.label}
-                        >
-                          {total > 0 ? `${compliant}/${total} compliant` : "—"}
-                        </span>
-                      );
-                    })}
-                  </div>
+                  <PolicyVariantBadges variants={r.policyVariants} pass="nonagentic" expectedTotalByLabel={expectedTotalByLabel} />
+                </td>
+                <td className="px-3 py-2">
+                  <PolicyVariantBadges variants={r.policyVariants} pass="agentic" expectedTotalByLabel={expectedTotalByLabel} />
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function PolicyVariantBadges({
+  variants,
+  pass,
+  expectedTotalByLabel,
+}: {
+  variants: PolicyVariant[];
+  pass: "nonagentic" | "agentic";
+  expectedTotalByLabel: Map<string, number>;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {variants.map((v) => {
+        const judged: JudgePass = v[pass];
+        const total = judged.criteriaVerdicts.length;
+        const compliant = judged.criteriaVerdicts.filter((c) => c.verdict === "COMPLIANT").length;
+        const expected = expectedTotalByLabel.get(v.label) ?? total;
+        const incomplete = total > 0 && total < expected;
+        return (
+          <span
+            key={v.label}
+            className={
+              incomplete
+                ? "inline-flex items-center gap-1 text-xs rounded-full bg-amber-100 px-2 py-0.5 tabular-nums text-amber-800 dark:bg-amber-950/50 dark:text-amber-300"
+                : "inline-flex items-center gap-1 text-xs rounded-full bg-slate-100 px-2 py-0.5 tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            }
+            title={
+              incomplete
+                ? `${v.label}: judge only returned ${total} of the ${expected} criteria seen elsewhere for this policy — likely an incomplete judge response, not a policy difference.`
+                : v.label
+            }
+          >
+            {total > 0 ? `${compliant}/${total} compliant${incomplete ? " ⚠" : ""}` : "—"}
+          </span>
+        );
+      })}
     </div>
   );
 }
