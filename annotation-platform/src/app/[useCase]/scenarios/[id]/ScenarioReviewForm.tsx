@@ -4,13 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { UseCase } from "@/lib/types";
 import type { CodebookCode } from "@/lib/db/queries";
-import {
-  CONFIDENCE_LEVELS,
-  DEDUCTION_REASON_CATEGORIES,
-  EVIDENCE_SOURCE_TYPES,
-  CODING_TARGET_FIELDS,
-  CODING_TARGET_FIELD_LABELS,
-} from "@/lib/annotationOptions";
+import { CODING_TARGET_FIELDS, CODING_TARGET_FIELD_LABELS } from "@/lib/annotationOptions";
 
 type Props = {
   useCase: UseCase;
@@ -126,12 +120,12 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
         annotatorName,
         agreesWithVerdict: agreesRaw === "" ? null : agreesRaw === "true",
         disagreementReason: form.get("disagreementReason") || null,
-        evidenceSourceType: form.get("evidenceSourceType") || null,
-        deductionReasonCategory: form.get("deductionReasonCategory") || null,
+        evidenceSourceType: null,
+        deductionReasonCategory: null,
         evidentiaryAttributionPresent:
           form.get("evidentiaryAttributionPresent") === "" ? null : form.get("evidentiaryAttributionPresent") === "true",
         freeText: form.get("freeText") || null,
-        confidence: form.get("confidence") || null,
+        confidence: null,
       };
       const annotationRes = await fetch("/api/annotations", {
         method: "POST",
@@ -206,27 +200,6 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
           <input name="disagreementReason" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Evidence source type</label>
-            <select name="evidenceSourceType" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
-              <option value="">—</option>
-              {EVIDENCE_SOURCE_TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Deduction reason category</label>
-            <select name="deductionReasonCategory" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
-              <option value="">—</option>
-              {DEDUCTION_REASON_CATEGORIES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
         <fieldset>
           <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
             Does every evidentiary claim in the explanation have a matching tool call in the log?
@@ -247,16 +220,6 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
         <div>
           <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Free-text observations</label>
           <textarea name="freeText" rows={3} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Your confidence in this review</label>
-          <select name="confidence" className="w-full max-w-xs rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
-            <option value="">—</option>
-            {CONFIDENCE_LEVELS.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
         </div>
       </div>
 

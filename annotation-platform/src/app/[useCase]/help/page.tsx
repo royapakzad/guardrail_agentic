@@ -62,8 +62,8 @@ export default async function HelpPage({ params }: { params: Promise<{ useCase: 
           <li><strong>The case</strong> — the scenario prompt and the assistant&apos;s response, side by side.</li>
           <li><strong>Judge evaluation</strong> — the automated judge&apos;s verdicts, explanations, and (for the agentic pass) its tool call log, URL checks, and claim checks. Read this before forming your own view.</li>
           <li>
-            <strong>Your review</strong> — one form where you record your structured judgment (agree/disagree, evidence
-            source, confidence, free-text notes) <em>and</em> apply qualitative codes to specific quotes, then save
+            <strong>Your review</strong> — one form where you record your structured judgment (agree/disagree,
+            disagreement reason, free-text notes) <em>and</em> apply qualitative codes to specific quotes, then save
             everything with a single &ldquo;Save review&rdquo; click. Saved reviews from every annotator appear above
             the form, each with Edit and Delete.
           </li>
