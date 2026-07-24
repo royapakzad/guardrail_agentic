@@ -3,10 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "npm run sync-policy-criteria",
     "dev": "next dev",
+    "prebuild": "npm run sync-policy-criteria",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "sync-policy-criteria": "node scripts/generate-policy-criteria.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

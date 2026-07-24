@@ -51,18 +51,18 @@ export function computeComplianceByCriterion(records: EvaluationRecord[]): Compl
   const summaries: ComplianceByCriterionSummary[] = [];
 
   for (const [label, items] of groups) {
-    const useCase = items[0]?.record.useCase;
+    const policyName = items[0]?.variant.policyName;
     const naCounts = new Map<string, VerdictCounts>();
     const agCounts = new Map<string, VerdictCounts>();
 
-    for (const { record, variant } of items) {
+    for (const { variant } of items) {
       for (const c of variant.nonagentic.criteriaVerdicts) {
-        const name = normalizeCriterionName(record.useCase, c.criterion);
+        const name = normalizeCriterionName(variant.policyName, c.criterion);
         if (!naCounts.has(name)) naCounts.set(name, emptyCounts());
         tally(naCounts.get(name)!, c.verdict);
       }
       for (const c of variant.agentic.criteriaVerdicts) {
-        const name = normalizeCriterionName(record.useCase, c.criterion);
+        const name = normalizeCriterionName(variant.policyName, c.criterion);
         if (!agCounts.has(name)) agCounts.set(name, emptyCounts());
         tally(agCounts.get(name)!, c.verdict);
       }
@@ -74,7 +74,7 @@ export function computeComplianceByCriterion(records: EvaluationRecord[]): Compl
       const agentic = agCounts.get(criterion) ?? emptyCounts();
       return {
         criterion,
-        toolTagged: useCase ? isToolTaggedCriterion(useCase, criterion) : false,
+        toolTagged: policyName ? isToolTaggedCriterion(policyName, criterion) : false,
         nonagentic,
         agentic,
         nonagenticComplianceRate: complianceRate(nonagentic),
