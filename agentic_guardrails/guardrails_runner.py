@@ -56,8 +56,6 @@ class NonAgenticJudgment:
     valid: Optional[bool]
     score: Optional[float]
     explanation: str
-    overall_verdict: str = ""
-    confidence: str = ""
     criteria_verdicts: list = field(default_factory=list)
     improvements: list = field(default_factory=list)
     claims_to_verify: list = field(default_factory=list)
@@ -121,7 +119,7 @@ _GENERATIVE_JUDGE_SYSTEM_PROMPT = (
     "Final score: max(0.05, 1.0 − X.XX) = Y.YY\n\n"
     "Respond with ONLY this JSON and nothing else:\n"
     "```json\n"
-    '{{"overall_verdict": "PASS", "confidence": "HIGH", "score": 0.80, '
+    '{{"score": 0.80, '
     '"explanation": "1. CRITERION: [assessment]\\n→ Verdict: compliant\\n'
     "2. CRITERION: [assessment]\\n→ Verdict: not fully compliant (−0.20)\\n"
     "DEDUCTION SUMMARY:\\nBase: 1.0\\nNot fully compliant criterion 2 (−0.20)\\n"
@@ -133,8 +131,6 @@ _GENERATIVE_JUDGE_SYSTEM_PROMPT = (
     '"human_review_needed": "Specific claim/URL/phrase/omission to check", '
     '"suggested_improvement": "Specific fix needed"}}]}}\n'
     "```\n\n"
-    "  overall_verdict: PASS (score>0.70) | BORDERLINE (0.55–0.70) | FAIL (<0.55)\n"
-    "  confidence: HIGH (<0.40 or >0.80) | MEDIUM (0.40–0.55 or 0.70–0.80) | LOW (0.55–0.70)\n"
     "  verdict values: COMPLIANT | NOT_FULLY_COMPLIANT\n"
     "  human_review_needed / suggested_improvement: required (non-empty) when verdict is "
     "NOT_FULLY_COMPLIANT, empty string otherwise\n"
@@ -288,18 +284,6 @@ def _run_generative_judge(
             cv["suggested_improvement"] for cv in criteria_verdicts if cv.get("suggested_improvement")
         ]
 
-        s = float(score) if score is not None else 0.0
-        overall = data.get("overall_verdict", "")
-        if not overall:
-            overall = "PASS" if s > 0.70 else ("FAIL" if s <= 0.55 else "BORDERLINE")
-        conf = data.get("confidence", "")
-        if not conf:
-            conf = (
-                "HIGH"
-                if (s < 0.40 or s > 0.80)
-                else ("MEDIUM" if (s < 0.55 or s > 0.70) else "LOW")
-            )
-
         claims_to_verify: list = [
             cv["human_review_needed"]
             for cv in criteria_verdicts
@@ -310,8 +294,6 @@ def _run_generative_judge(
             valid=valid,
             score=score,
             explanation=explanation,
-            overall_verdict=overall,
-            confidence=conf,
             criteria_verdicts=criteria_verdicts,
             improvements=improvements,
             claims_to_verify=claims_to_verify,
