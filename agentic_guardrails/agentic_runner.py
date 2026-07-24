@@ -385,28 +385,6 @@ def _summarize_tool_result(tool_name: str, args: dict, result_str: str) -> str:
     return result_str[:300]
 
 
-# ── Confidence inference ──────────────────────────────────────────────────────
-
-def _infer_confidence(score: Optional[float]) -> str:
-    """
-    Infer a HIGH / MEDIUM / LOW confidence label from the numeric score.
-
-    HIGH  : score ≤ 0.40 or ≥ 0.80  (far from 0.6 threshold — clear verdict)
-    MEDIUM: score ≤ 0.55 or ≥ 0.70  (moderate distance from threshold)
-    LOW   : score 0.55–0.70          (borderline — flag for human review)
-
-    Kept in sync with _derive_confidence() in visualize_results.py.
-    """
-    if score is None:
-        return "LOW"
-    s = float(score)
-    if s <= 0.40 or s >= 0.80:
-        return "HIGH"
-    if s <= 0.55 or s >= 0.70:
-        return "MEDIUM"
-    return "LOW"
-
-
 @dataclass
 class AgenticJudgment:
     valid: Optional[bool]
@@ -420,10 +398,6 @@ class AgenticJudgment:
     raw_final_message: str = ""
 
     # ── Categorical judgment fields ───────────────────────────────────────────
-    # overall_verdict: PASS | FAIL | BORDERLINE (score 0.55–0.70)
-    overall_verdict: str = ""
-    # confidence: HIGH (score <0.40 or >0.80) | MEDIUM | LOW (score 0.55–0.70)
-    confidence: str = ""
     # Per-criterion breakdown: [{criterion, verdict, issues, improvements, tool_influenced}]
     # verdict values: COMPLIANT | MINOR_ISSUE | MAJOR_ISSUE | CRITICAL
     criteria_verdicts: list[dict] = field(default_factory=list)
@@ -547,8 +521,6 @@ def build_agentic_guardrail_system_prompt(
         "  Total deductions: −X.XX\n"
         "  Final score: max(0.05, 1.0 − X.XX) = Y.YY\n\n"
         "FINAL JUDGMENT — produce a single JSON block with this exact structure:\n"
-        "  overall_verdict: PASS | FAIL | BORDERLINE (score 0.55–0.70)\n"
-        "  confidence: HIGH (score <0.40 or >0.80) | MEDIUM | LOW (score 0.55–0.70)\n"
         "  score: Y.YY from DEDUCTION SUMMARY — must match arithmetic\n"
         "  explanation: the full numbered-criterion text with DEDUCTION SUMMARY\n"
         "  criteria_verdicts: array — EXACTLY one entry per criterion shown in the policy above:\n"
@@ -567,7 +539,7 @@ def build_agentic_guardrail_system_prompt(
         "        from the tool list above — [] if none) }\n"
         "  claim_checks: [{claim, status: verified|contradicted|unverifiable}]\n\n"
         "```json\n"
-        '{"overall_verdict": "FAIL", "confidence": "HIGH", "score": 0.60, '
+        '{"score": 0.60, '
         '"explanation": "1. CRITERION NAME: [assessment citing tool evidence] '
         "→ Verdict: not fully compliant (−0.20)\\n"
         "2. CRITERION NAME 2: [assessment citing tool evidence] → Verdict: not fully compliant (−0.20)\\n"
@@ -586,7 +558,7 @@ def build_agentic_guardrail_system_prompt(
         '"tools_used": ["<tool name actually called>"]}], '
         '"claim_checks": [{"claim": "example claim", "status": "contradicted"}]}\n'
         "```\n"
-        f"Set valid=true and overall_verdict=PASS if score > {VALID_SCORE_THRESHOLD}. "
+        f"Set valid=true if score > {VALID_SCORE_THRESHOLD}. "
         "Do not output anything after the JSON block. The \"criterion\" field in each "
         "criteria_verdicts entry MUST be copied EXACTLY from the numbered heading in the "
         "policy above — same words, same punctuation, no added numbering, section "
@@ -727,8 +699,7 @@ def parse_judgment_from_text(text: str) -> dict:
 
     Returns a dict with keys:
       valid, score, explanation, claim_checks,
-      overall_verdict, confidence, criteria_verdicts,
-      tool_changed_verdict_for, improvements
+      criteria_verdicts, tool_changed_verdict_for, improvements
 
     Score is cross-checked against DEDUCTION SUMMARY arithmetic; the arithmetic
     overrides the JSON scalar if they differ by > 0.01.
@@ -779,25 +750,11 @@ def parse_judgment_from_text(text: str) -> dict:
                     and cv.get("verdict") not in ("COMPLIANT",)
                 ]
 
-            # overall_verdict and confidence
-            overall = data.get("overall_verdict", "")
-            if not overall:
-                if score is None:
-                    overall = ""
-                elif score > VALID_SCORE_THRESHOLD:
-                    overall = "PASS" if score > 0.70 else "BORDERLINE"
-                else:
-                    overall = "FAIL"
-
-            confidence = data.get("confidence", "") or _infer_confidence(score)
-
             return {
                 "valid": valid,
                 "score": score,
                 "explanation": explanation,
                 "claim_checks": claim_checks,
-                "overall_verdict": overall,
-                "confidence": confidence,
                 "criteria_verdicts": criteria_verdicts,
                 "tool_changed_verdict_for": tool_changed,
                 "improvements": improvements,
@@ -807,7 +764,7 @@ def parse_judgment_from_text(text: str) -> dict:
 
     return {
         "valid": None, "score": None, "explanation": text.strip(),
-        "claim_checks": [], "overall_verdict": "", "confidence": "LOW",
+        "claim_checks": [],
         "criteria_verdicts": [], "tool_changed_verdict_for": [], "improvements": [],
     }
 
@@ -845,7 +802,6 @@ _CONCLUDE_MESSAGE = {
         "3. CRITERION NAME 3: [text-only assessment] → Verdict: ...\\n"
         "DEDUCTION SUMMARY:\\nBase: 1.0\\nNot fully compliant criterion 2 (−0.20)\\n"
         'Total deductions: −0.20\\nFinal score: max(0.05, 1.0 − 0.20) = 0.80.", '
-        '"overall_verdict": "BORDERLINE", "confidence": "MEDIUM", '
         '"criteria_verdicts": ['
         '{"criterion": "CRITERION NAME", "verdict": "COMPLIANT", '
         '"human_review_needed": "", "suggested_improvement": "", '
@@ -885,7 +841,6 @@ _RETRY_MESSAGE = {
         '"explanation": "1. CRITERION NAME: [assessment] → Verdict: not fully compliant (−0.20)\\n'
         "DEDUCTION SUMMARY:\\nBase: 1.0\\nNot fully compliant criterion 1 (−0.20)\\n"
         'Total deductions: −0.20\\nFinal score: max(0.05, 1.0 − 0.20) = 0.80.", '
-        '"overall_verdict": "BORDERLINE", "confidence": "MEDIUM", '
         '"criteria_verdicts": [{"criterion": "CRITERION NAME", "verdict": "NOT_FULLY_COMPLIANT", '
         '"human_review_needed": "<name of the tool you actually called> returned <the '
         'actual finding>, relevant to <the specific claim/URL/entity in the response>", '
@@ -1163,8 +1118,6 @@ def run_agentic_guardrail(
                 claim_checks=claim_checks,
                 raw_final_message=final_text,
                 # Categorical fields from new output format
-                overall_verdict=j.get("overall_verdict", ""),
-                confidence=j.get("confidence", "") or _infer_confidence(score),
                 criteria_verdicts=agentic_criteria_verdicts,
                 tool_changed_verdict_for=agentic_tool_changed,
                 improvements=j.get("improvements", []),

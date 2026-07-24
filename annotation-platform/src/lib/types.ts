@@ -57,8 +57,6 @@ export type JudgePass = {
   /** Recomputed from score, not trusted from the raw field — see adapters/shared.ts */
   valid: boolean | null;
   explanation: string;
-  overallVerdict?: string;
-  confidence?: string;
   criteriaVerdicts: CriterionVerdict[];
   tokens: TokenUsage;
   judgmentTimeS: number | null;

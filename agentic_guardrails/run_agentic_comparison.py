@@ -450,8 +450,6 @@ def process_row(
                 out[f"{base}_nonagentic_valid"] = gr.valid
                 out[f"{base}_nonagentic_score"] = gr.score
                 out[f"{base}_nonagentic_explanation"] = gr.explanation
-                out[f"{base}_nonagentic_overall_verdict"] = gr.overall_verdict
-                out[f"{base}_nonagentic_confidence"] = gr.confidence
                 out[f"{base}_nonagentic_criteria_verdicts"] = gr.criteria_verdicts
                 out[f"{base}_nonagentic_improvements"] = gr.improvements
                 out[f"{base}_nonagentic_prompt_tokens"] = na_prompt_tokens
@@ -506,8 +504,6 @@ def process_row(
             out[f"{base}_agentic_valid"] = aj.valid
             out[f"{base}_agentic_score"] = aj.score
             out[f"{base}_agentic_explanation"] = aj.explanation
-            out[f"{base}_agentic_overall_verdict"] = aj.overall_verdict
-            out[f"{base}_agentic_confidence"] = aj.confidence
             out[f"{base}_agentic_criteria_verdicts"] = aj.criteria_verdicts
             out[f"{base}_agentic_tool_changed_verdict_for"] = aj.tool_changed_verdict_for
             out[f"{base}_agentic_improvements"] = aj.improvements
