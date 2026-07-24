@@ -30,12 +30,12 @@ export function computeFlipRate(records: EvaluationRecord[]): FlipRateSummary[] 
     let comparableRecordCount = 0;
     let flippedRecordCount = 0;
 
-    for (const { record, variant } of items) {
+    for (const { variant } of items) {
       const naByName = new Map(
-        variant.nonagentic.criteriaVerdicts.map((c) => [normalizeCriterionName(record.useCase, c.criterion), c.verdict])
+        variant.nonagentic.criteriaVerdicts.map((c) => [normalizeCriterionName(variant.policyName, c.criterion), c.verdict])
       );
       const agByName = new Map(
-        variant.agentic.criteriaVerdicts.map((c) => [normalizeCriterionName(record.useCase, c.criterion), c.verdict])
+        variant.agentic.criteriaVerdicts.map((c) => [normalizeCriterionName(variant.policyName, c.criterion), c.verdict])
       );
 
       if (agByName.size === 0) continue; // no agentic criteria data to compare — exclude, not "no flip"

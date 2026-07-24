@@ -29,12 +29,12 @@ export function computeCriterionFlips(records: EvaluationRecord[]): CriterionFli
   const summaries: CriterionFlipSummary[] = [];
 
   for (const [label, items] of groups) {
-    const useCase = items[0]?.record.useCase;
-    if (!useCase) {
+    const policyName = items[0]?.variant.policyName;
+    if (!policyName) {
       summaries.push({ label, rows: [] });
       continue;
     }
-    const toolCriteria = new Set(toolTaggedCriteriaNames(useCase));
+    const toolCriteria = new Set(toolTaggedCriteriaNames(policyName));
 
     const perCriterion = new Map<
       string,
@@ -44,12 +44,12 @@ export function computeCriterionFlips(records: EvaluationRecord[]): CriterionFli
       perCriterion.set(name, { n: 0, flipped: 0, transitions: new Map() });
     }
 
-    for (const { record, variant } of items) {
+    for (const { variant } of items) {
       const naByName = new Map(
-        variant.nonagentic.criteriaVerdicts.map((c) => [normalizeCriterionName(record.useCase, c.criterion), c.verdict])
+        variant.nonagentic.criteriaVerdicts.map((c) => [normalizeCriterionName(variant.policyName, c.criterion), c.verdict])
       );
       const agByName = new Map(
-        variant.agentic.criteriaVerdicts.map((c) => [normalizeCriterionName(record.useCase, c.criterion), c.verdict])
+        variant.agentic.criteriaVerdicts.map((c) => [normalizeCriterionName(variant.policyName, c.criterion), c.verdict])
       );
 
       for (const criterion of toolCriteria) {
