@@ -7,6 +7,7 @@ import type {
   ToolCall,
   UrlCheck,
 } from "@/lib/types";
+import { POLICY_CRITERIA } from "@/lib/policyCriteria";
 
 /** Matches visualize_results.py's _VALID_THRESHOLD — a pipeline quirk where the
  * stored `valid` field is sometimes wrong, so downstream consumers recompute it
@@ -79,17 +80,28 @@ export function readClaimChecks(record: Record<string, unknown>, key: string): C
 // `{prefix}_agentic_*` column family per policy variant, so parsing it is
 // identical regardless of domain.
 
+// Known policy names, longest first, so e.g. "humanitarian_policy_explicit"
+// doesn't shadow the more specific "humanitarian_policy_explicit_tool_selection".
+const KNOWN_POLICY_NAMES = Object.keys(POLICY_CRITERIA).sort((a, b) => b.length - a.length);
+
 /** run_agentic_comparison.py's multi-judge column prefix embeds the judge
  * model at the end (e.g. "policy_cybersecurity_explicit_claude_sonnet_4_6")
- * -- strip a known model suffix to recover the plain policy name. Anything
- * not matching one of these is treated as an unknown model rather than
- * silently mis-splitting the policy name. */
-export const KNOWN_MODEL_SUFFIXES = ["claude_sonnet_4_6", "gpt_5_nano"];
-
+ * -- strip it off to recover the plain policy name. Previously this matched
+ * against a hardcoded list of known judge-model suffixes, which silently
+ * broke (left the model suffix stuck on `policyName`, so
+ * POLICY_CRITERIA_BY_POLICY[policyName] lookups missed and criterion names
+ * fell back to their raw, un-normalized form -- see issue for the "doubled
+ * criterion rows" this caused) every time a run used a judge model that
+ * wasn't already in that list. Matching against the actual known policy
+ * names instead (already generated from config/*.txt -- see
+ * policyCriteria.ts) means any judge model works without a code change. */
 function splitPolicyAndModel(prefix: string): { policyName: string; judgeModel: string | null } {
-  for (const suffix of KNOWN_MODEL_SUFFIXES) {
-    if (prefix.endsWith(`_${suffix}`)) {
-      return { policyName: prefix.slice(0, -(suffix.length + 1)), judgeModel: suffix };
+  for (const policyName of KNOWN_POLICY_NAMES) {
+    if (prefix === policyName) {
+      return { policyName, judgeModel: null };
+    }
+    if (prefix.startsWith(`${policyName}_`)) {
+      return { policyName, judgeModel: prefix.slice(policyName.length + 1) };
     }
   }
   return { policyName: prefix, judgeModel: null };
