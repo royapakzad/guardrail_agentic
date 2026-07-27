@@ -273,6 +273,9 @@ function ComplianceTable({ variant }: { variant: PolicyVariant }) {
     return <p className="text-sm text-slate-400 dark:text-slate-500">No criteria returned for this judge/policy.</p>;
   }
 
+  const nonagenticTexts = splitExplanationByCriterion(variant.nonagentic.explanation);
+  const agenticTexts = splitExplanationByCriterion(variant.agentic.explanation);
+
   return (
     <div className="flex flex-col gap-2">
       <div className="text-xs text-slate-500 dark:text-slate-400">
@@ -287,12 +290,15 @@ function ComplianceTable({ variant }: { variant: PolicyVariant }) {
               <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">No tools</th>
               <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">With tools</th>
               <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Tools used</th>
-              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">What the tool found</th>
+              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Suggested Review and Improvement</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => {
               const changed = changedCriteria.has(row.criterion) || row.nonagentic.verdict !== row.agentic.verdict;
+              const key = normalizeCriterionName(row.criterion);
+              const nonagenticText = nonagenticTexts.get(key);
+              const agenticText = agenticTexts.get(key);
               return (
                 <tr
                   key={row.criterion}
@@ -308,8 +314,22 @@ function ComplianceTable({ variant }: { variant: PolicyVariant }) {
                       </div>
                     )}
                   </td>
-                  <td className="px-3 py-2 whitespace-nowrap"><VerdictBadge verdict={row.nonagentic.verdict} /></td>
-                  <td className="px-3 py-2 whitespace-nowrap"><VerdictBadge verdict={row.agentic.verdict} /></td>
+                  <td className="px-3 py-2 max-w-sm">
+                    <div className="flex flex-col gap-1.5">
+                      <VerdictBadge verdict={row.nonagentic.verdict} />
+                      {nonagenticText && (
+                        <p className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap break-words">{nonagenticText}</p>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 max-w-sm">
+                    <div className="flex flex-col gap-1.5">
+                      <VerdictBadge verdict={row.agentic.verdict} />
+                      {agenticText && (
+                        <p className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap break-words">{agenticText}</p>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-3 py-2">
                     <ToolChips tools={row.agentic.tools_used} />
                   </td>
@@ -324,6 +344,49 @@ function ComplianceTable({ variant }: { variant: PolicyVariant }) {
       </div>
     </div>
   );
+}
+
+/** Normalizes a criterion name for matching between criteriaVerdicts entries
+ * and the numbered headings inside a raw explanation string -- strips a
+ * trailing parenthetical/bracket annotation some judge models append (see
+ * agentic_runner.py's own _normalize_criterion_name, which this mirrors) and
+ * compares case-insensitively so minor judge formatting drift doesn't break
+ * the match. */
+function normalizeCriterionName(name: string): string {
+  return name
+    .replace(/\s*[([][^)\]]*[)\]]\s*$/, "")
+    .trim()
+    .toUpperCase();
+}
+
+/** Splits a judge's free-text explanation into one block of text per
+ * criterion, keyed by normalized criterion name, so each policy criterion's
+ * assessment can be shown next to its own row instead of as one long
+ * undifferentiated paragraph. Explanations follow the numbered format
+ * "N. CRITERION NAME: assessment text... → Verdict: ..." repeated once per
+ * criterion, followed by a DEDUCTION SUMMARY section -- which is deliberately
+ * excluded here (score arithmetic is not shown anywhere in this UI). */
+function splitExplanationByCriterion(explanation: string): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!explanation) return map;
+
+  const summaryIndex = explanation.search(/deduction summary/i);
+  const body = summaryIndex >= 0 ? explanation.slice(0, summaryIndex) : explanation;
+
+  const headingRe = /^\s*\d+\.\s+([^\n:]+):/gm;
+  const headings: { name: string; start: number; contentStart: number }[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = headingRe.exec(body)) !== null) {
+    headings.push({ name: match[1], start: match.index, contentStart: match.index + match[0].length });
+  }
+
+  headings.forEach((h, i) => {
+    const end = i + 1 < headings.length ? headings[i + 1].start : body.length;
+    const text = body.slice(h.contentStart, end).trim();
+    if (text) map.set(normalizeCriterionName(h.name), text);
+  });
+
+  return map;
 }
 
 function ToolChips({ tools }: { tools?: string[] }) {
