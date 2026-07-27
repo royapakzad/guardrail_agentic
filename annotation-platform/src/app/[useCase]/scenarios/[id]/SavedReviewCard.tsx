@@ -50,6 +50,43 @@ function AlignmentBadge({ alignment }: { alignment: string | null }) {
   return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">aligned with: {label}</span>;
 }
 
+function AlignmentEditFields({
+  label,
+  radioName,
+  explanationName,
+  currentAlignment,
+  currentExplanation,
+}: {
+  label: string;
+  radioName: string;
+  explanationName: string;
+  currentAlignment: string | null;
+  currentExplanation: string | null;
+}) {
+  return (
+    <div className="rounded border border-slate-200 p-2 flex flex-col gap-2 dark:border-slate-700">
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
+      <fieldset>
+        <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+          Is your judgment more aligned with the agentic guardrail or the non-agentic guardrail?
+        </legend>
+        <div className="flex flex-col gap-1.5 text-sm">
+          {JUDGMENT_ALIGNMENT_OPTIONS.map((option) => (
+            <label key={option} className="flex items-center gap-1.5">
+              <input type="radio" name={radioName} value={option} defaultChecked={currentAlignment === option} />
+              {JUDGMENT_ALIGNMENT_LABELS[option]}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <div>
+        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Explain in a few words</label>
+        <input name={explanationName} defaultValue={currentExplanation ?? ""} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
+      </div>
+    </div>
+  );
+}
+
 function AnnotationSection({ annotation }: { annotation: Annotation }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -67,8 +104,10 @@ function AnnotationSection({ annotation }: { annotation: Annotation }) {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          judgmentAlignment: form.get("judgmentAlignment") || null,
-          alignmentExplanation: form.get("alignmentExplanation") || null,
+          judgmentAlignmentEn: form.get("judgmentAlignmentEn") || null,
+          alignmentExplanationEn: form.get("alignmentExplanationEn") || null,
+          judgmentAlignmentNonEn: form.get("judgmentAlignmentNonEn") || null,
+          alignmentExplanationNonEn: form.get("alignmentExplanationNonEn") || null,
           freeText: form.get("freeText") || null,
         }),
       });
@@ -104,23 +143,20 @@ function AnnotationSection({ annotation }: { annotation: Annotation }) {
   if (editing) {
     return (
       <form onSubmit={handleSave} className="flex flex-col gap-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-800">
-        <fieldset>
-          <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-            Is your judgment more aligned with the agentic guardrail or the non-agentic guardrail?
-          </legend>
-          <div className="flex flex-col gap-1.5 text-sm">
-            {JUDGMENT_ALIGNMENT_OPTIONS.map((option) => (
-              <label key={option} className="flex items-center gap-1.5">
-                <input type="radio" name="judgmentAlignment" value={option} defaultChecked={annotation.judgment_alignment === option} />
-                {JUDGMENT_ALIGNMENT_LABELS[option]}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Explain in a few words</label>
-          <input name="alignmentExplanation" defaultValue={annotation.alignment_explanation ?? ""} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
-        </div>
+        <AlignmentEditFields
+          label="English"
+          radioName="judgmentAlignmentEn"
+          explanationName="alignmentExplanationEn"
+          currentAlignment={annotation.judgment_alignment_en}
+          currentExplanation={annotation.alignment_explanation_en}
+        />
+        <AlignmentEditFields
+          label="Non-English"
+          radioName="judgmentAlignmentNonEn"
+          explanationName="alignmentExplanationNonEn"
+          currentAlignment={annotation.judgment_alignment_non_en}
+          currentExplanation={annotation.alignment_explanation_non_en}
+        />
         <div>
           <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Free-text observations</label>
           <textarea name="freeText" defaultValue={annotation.free_text ?? ""} rows={3} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
@@ -141,7 +177,10 @@ function AnnotationSection({ annotation }: { annotation: Annotation }) {
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-2 flex-wrap">
-        <AlignmentBadge alignment={annotation.judgment_alignment} />
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">EN</span>
+        <AlignmentBadge alignment={annotation.judgment_alignment_en} />
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">non-EN</span>
+        <AlignmentBadge alignment={annotation.judgment_alignment_non_en} />
         {annotation.confidence && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">confidence: {annotation.confidence}</span>}
         {annotation.evidence_source_type && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">source: {annotation.evidence_source_type}</span>}
         {annotation.deduction_reason_category && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">reason: {annotation.deduction_reason_category}</span>}
@@ -157,7 +196,8 @@ function AnnotationSection({ annotation }: { annotation: Annotation }) {
           )}
         </span>
       </div>
-      {annotation.alignment_explanation && <p className="text-sm text-slate-700 dark:text-slate-300">{annotation.alignment_explanation}</p>}
+      {annotation.alignment_explanation_en && <p className="text-sm text-slate-700 dark:text-slate-300">EN: {annotation.alignment_explanation_en}</p>}
+      {annotation.alignment_explanation_non_en && <p className="text-sm text-slate-700 dark:text-slate-300">Non-EN: {annotation.alignment_explanation_non_en}</p>}
       {annotation.free_text && <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{annotation.free_text}</p>}
       {status === "error" && <p className="text-xs text-red-700 dark:text-red-400">{errorMessage}</p>}
     </div>

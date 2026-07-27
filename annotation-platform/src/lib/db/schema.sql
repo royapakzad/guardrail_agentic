@@ -12,8 +12,10 @@ CREATE TABLE IF NOT EXISTS annotations (
   annotator_name TEXT NOT NULL,
   evidence_source_type TEXT,
   deduction_reason_category TEXT,
-  judgment_alignment TEXT,
-  alignment_explanation TEXT,
+  judgment_alignment_en TEXT,
+  alignment_explanation_en TEXT,
+  judgment_alignment_non_en TEXT,
+  alignment_explanation_non_en TEXT,
   free_text TEXT,
   confidence TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -92,12 +94,19 @@ ALTER TABLE annotations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL
 ALTER TABLE code_applications ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 -- Part 4 "Your review" redesign: replaced the agree/disagree-with-verdict and
--- evidentiary-attribution fields with a single judgment on whether the
--- annotator's own read is more aligned with the agentic or non-agentic
--- guardrail. Destructive -- drops any previously recorded answers for the
--- fields it replaces.
-ALTER TABLE annotations ADD COLUMN IF NOT EXISTS judgment_alignment TEXT;
-ALTER TABLE annotations ADD COLUMN IF NOT EXISTS alignment_explanation TEXT;
+-- evidentiary-attribution fields with a judgment on whether the annotator's
+-- own read is more aligned with the agentic or non-agentic guardrail --
+-- recorded once per language (English / non-English), since a scenario page
+-- shows both language variants side by side and the annotator's read can
+-- differ between them. Destructive -- drops any previously recorded answers
+-- for the fields it replaces, including the single-language version of this
+-- same judgment added earlier in the same redesign.
+ALTER TABLE annotations ADD COLUMN IF NOT EXISTS judgment_alignment_en TEXT;
+ALTER TABLE annotations ADD COLUMN IF NOT EXISTS alignment_explanation_en TEXT;
+ALTER TABLE annotations ADD COLUMN IF NOT EXISTS judgment_alignment_non_en TEXT;
+ALTER TABLE annotations ADD COLUMN IF NOT EXISTS alignment_explanation_non_en TEXT;
 ALTER TABLE annotations DROP COLUMN IF EXISTS agrees_with_verdict;
 ALTER TABLE annotations DROP COLUMN IF EXISTS disagreement_reason;
 ALTER TABLE annotations DROP COLUMN IF EXISTS evidentiary_attribution_present;
+ALTER TABLE annotations DROP COLUMN IF EXISTS judgment_alignment;
+ALTER TABLE annotations DROP COLUMN IF EXISTS alignment_explanation;

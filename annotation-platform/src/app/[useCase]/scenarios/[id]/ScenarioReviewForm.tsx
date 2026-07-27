@@ -100,7 +100,8 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
 
     const form = new FormData(e.currentTarget);
     const annotatorName = String(form.get("annotatorName") ?? "").trim();
-    const judgmentAlignmentRaw = form.get("judgmentAlignment");
+    const judgmentAlignmentEnRaw = form.get("judgmentAlignmentEn");
+    const judgmentAlignmentNonEnRaw = form.get("judgmentAlignmentNonEn");
 
     try {
       if (!annotatorName) throw new Error("Your name is required");
@@ -125,8 +126,10 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
         annotatorName,
         evidenceSourceType: null,
         deductionReasonCategory: null,
-        judgmentAlignment: judgmentAlignmentRaw || null,
-        alignmentExplanation: form.get("alignmentExplanation") || null,
+        judgmentAlignmentEn: judgmentAlignmentEnRaw || null,
+        alignmentExplanationEn: form.get("alignmentExplanationEn") || null,
+        judgmentAlignmentNonEn: judgmentAlignmentNonEnRaw || null,
+        alignmentExplanationNonEn: form.get("alignmentExplanationNonEn") || null,
         freeText: form.get("freeText") || null,
         confidence: null,
       };
@@ -183,24 +186,8 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
       <div className="flex flex-col gap-4">
         <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Your review</h3>
 
-        <fieldset>
-          <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-            Is your judgment more aligned with the agentic guardrail or the non-agentic guardrail?
-          </legend>
-          <div className="flex flex-col gap-1.5 text-sm">
-            {JUDGMENT_ALIGNMENT_OPTIONS.map((option) => (
-              <label key={option} className="flex items-center gap-1.5">
-                <input type="radio" name="judgmentAlignment" value={option} />
-                {JUDGMENT_ALIGNMENT_LABELS[option]}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-
-        <div>
-          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Explain in a few words</label>
-          <input name="alignmentExplanation" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
-        </div>
+        <AlignmentFields label="English" radioName="judgmentAlignmentEn" explanationName="alignmentExplanationEn" />
+        <AlignmentFields label="Non-English" radioName="judgmentAlignmentNonEn" explanationName="alignmentExplanationNonEn" />
 
         <div>
           <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Free-text observations</label>
@@ -249,6 +236,39 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
         {status === "error" && <span className="text-sm text-red-700 dark:text-red-400">{errorMessage}</span>}
       </div>
     </form>
+  );
+}
+
+function AlignmentFields({
+  label,
+  radioName,
+  explanationName,
+}: {
+  label: string;
+  radioName: string;
+  explanationName: string;
+}) {
+  return (
+    <div className="rounded border border-slate-200 p-3 flex flex-col gap-2 dark:border-slate-700">
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
+      <fieldset>
+        <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+          Is your judgment more aligned with the agentic guardrail or the non-agentic guardrail?
+        </legend>
+        <div className="flex flex-col gap-1.5 text-sm">
+          {JUDGMENT_ALIGNMENT_OPTIONS.map((option) => (
+            <label key={option} className="flex items-center gap-1.5">
+              <input type="radio" name={radioName} value={option} />
+              {JUDGMENT_ALIGNMENT_LABELS[option]}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <div>
+        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Explain in a few words</label>
+        <input name={explanationName} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
+      </div>
+    </div>
   );
 }
 

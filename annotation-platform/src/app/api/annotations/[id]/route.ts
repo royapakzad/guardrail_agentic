@@ -29,8 +29,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.confidence && !CONFIDENCE_LEVELS.includes(body.confidence)) {
     return NextResponse.json({ error: "Invalid confidence" }, { status: 400 });
   }
-  if (body.judgmentAlignment && !JUDGMENT_ALIGNMENT_OPTIONS.includes(body.judgmentAlignment)) {
-    return NextResponse.json({ error: "Invalid judgmentAlignment" }, { status: 400 });
+  if (body.judgmentAlignmentEn && !JUDGMENT_ALIGNMENT_OPTIONS.includes(body.judgmentAlignmentEn)) {
+    return NextResponse.json({ error: "Invalid judgmentAlignmentEn" }, { status: 400 });
+  }
+  if (body.judgmentAlignmentNonEn && !JUDGMENT_ALIGNMENT_OPTIONS.includes(body.judgmentAlignmentNonEn)) {
+    return NextResponse.json({ error: "Invalid judgmentAlignmentNonEn" }, { status: 400 });
   }
 
   try {
@@ -38,8 +41,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       id,
       evidenceSourceType: body.evidenceSourceType ?? null,
       deductionReasonCategory: body.deductionReasonCategory ?? null,
-      judgmentAlignment: body.judgmentAlignment ?? null,
-      alignmentExplanation: body.alignmentExplanation ? String(body.alignmentExplanation) : null,
+      judgmentAlignmentEn: body.judgmentAlignmentEn ?? null,
+      alignmentExplanationEn: body.alignmentExplanationEn ? String(body.alignmentExplanationEn) : null,
+      judgmentAlignmentNonEn: body.judgmentAlignmentNonEn ?? null,
+      alignmentExplanationNonEn: body.alignmentExplanationNonEn ? String(body.alignmentExplanationNonEn) : null,
       freeText: body.freeText ? String(body.freeText) : null,
       confidence: body.confidence ?? null,
     });

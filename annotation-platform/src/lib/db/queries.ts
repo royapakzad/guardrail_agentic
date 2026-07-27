@@ -11,8 +11,10 @@ export type Annotation = {
   annotator_name: string;
   evidence_source_type: string | null;
   deduction_reason_category: string | null;
-  judgment_alignment: string | null;
-  alignment_explanation: string | null;
+  judgment_alignment_en: string | null;
+  alignment_explanation_en: string | null;
+  judgment_alignment_non_en: string | null;
+  alignment_explanation_non_en: string | null;
   free_text: string | null;
   confidence: string | null;
   created_at: string;
@@ -27,8 +29,10 @@ export type NewAnnotation = {
   annotatorName: string;
   evidenceSourceType: string | null;
   deductionReasonCategory: string | null;
-  judgmentAlignment: string | null;
-  alignmentExplanation: string | null;
+  judgmentAlignmentEn: string | null;
+  alignmentExplanationEn: string | null;
+  judgmentAlignmentNonEn: string | null;
+  alignmentExplanationNonEn: string | null;
   freeText: string | null;
   confidence: string | null;
 };
@@ -39,11 +43,15 @@ export async function insertAnnotation(input: NewAnnotation): Promise<Annotation
     INSERT INTO annotations (
       scenario_id, use_case, language, policy_label, annotator_name,
       evidence_source_type, deduction_reason_category,
-      judgment_alignment, alignment_explanation, free_text, confidence
+      judgment_alignment_en, alignment_explanation_en,
+      judgment_alignment_non_en, alignment_explanation_non_en,
+      free_text, confidence
     ) VALUES (
       ${input.scenarioId}, ${input.useCase}, ${input.language}, ${input.policyLabel}, ${input.annotatorName},
       ${input.evidenceSourceType}, ${input.deductionReasonCategory},
-      ${input.judgmentAlignment}, ${input.alignmentExplanation}, ${input.freeText}, ${input.confidence}
+      ${input.judgmentAlignmentEn}, ${input.alignmentExplanationEn},
+      ${input.judgmentAlignmentNonEn}, ${input.alignmentExplanationNonEn},
+      ${input.freeText}, ${input.confidence}
     )
     RETURNING *
   `;
@@ -74,8 +82,10 @@ export type UpdateAnnotation = {
   id: number;
   evidenceSourceType: string | null;
   deductionReasonCategory: string | null;
-  judgmentAlignment: string | null;
-  alignmentExplanation: string | null;
+  judgmentAlignmentEn: string | null;
+  alignmentExplanationEn: string | null;
+  judgmentAlignmentNonEn: string | null;
+  alignmentExplanationNonEn: string | null;
   freeText: string | null;
   confidence: string | null;
 };
@@ -87,8 +97,10 @@ export async function updateAnnotation(input: UpdateAnnotation): Promise<Annotat
     SET
       evidence_source_type = ${input.evidenceSourceType},
       deduction_reason_category = ${input.deductionReasonCategory},
-      judgment_alignment = ${input.judgmentAlignment},
-      alignment_explanation = ${input.alignmentExplanation},
+      judgment_alignment_en = ${input.judgmentAlignmentEn},
+      alignment_explanation_en = ${input.alignmentExplanationEn},
+      judgment_alignment_non_en = ${input.judgmentAlignmentNonEn},
+      alignment_explanation_non_en = ${input.alignmentExplanationNonEn},
       free_text = ${input.freeText},
       confidence = ${input.confidence},
       updated_at = now()
