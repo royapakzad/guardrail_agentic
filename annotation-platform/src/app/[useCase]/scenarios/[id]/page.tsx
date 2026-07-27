@@ -49,6 +49,33 @@ export default async function ScenarioDetailPage({
     reviewDbError = err instanceof Error ? err.message : "Could not load saved reviews";
   }
 
+  // One shared review/codebook section for the whole scenario, not one per
+  // language -- a bilingual scenario is one coding unit for an annotator, so
+  // it needs exactly one review, not a duplicate per language. Ties to
+  // whichever policy variant label the (shared) variant selector points at,
+  // falling back to the first record's first variant.
+  const reviewPolicyLabel = variantParam ?? records[0].policyVariants[0]?.label ?? "";
+  const reviewLanguage = records.map((r) => r.language).join("+");
+  const reviewAnnotations = annotations.filter((a) => a.policy_label === reviewPolicyLabel);
+  const reviewCodeApplications = codeApplications.filter((a) => a.policy_label === reviewPolicyLabel);
+  const annotatorNames = [
+    ...new Set([
+      ...reviewAnnotations.map((a) => a.annotator_name),
+      ...reviewCodeApplications.map((a) => a.annotator_name),
+    ]),
+  ];
+  const reviewGroups = annotatorNames
+    .map((name) => {
+      const annotation = reviewAnnotations.find((a) => a.annotator_name === name) ?? null;
+      const apps = reviewCodeApplications.filter((a) => a.annotator_name === name);
+      const latest = [annotation?.updated_at, ...apps.map((a) => a.updated_at)]
+        .filter((d): d is string => Boolean(d))
+        .sort()
+        .at(-1);
+      return { annotatorName: name, annotation, codeApplications: apps, latest: latest ?? "" };
+    })
+    .sort((a, b) => b.latest.localeCompare(a.latest));
+
   return (
     <div className="flex flex-col gap-8">
       <UseCaseNav useCase={useCase} datasetId={String(datasetId)} />
@@ -73,14 +100,39 @@ export default async function ScenarioDetailPage({
             datasetId={datasetId}
             record={record}
             variantParam={variantParam}
-            annotations={annotations.filter((a) => a.language === record.language)}
-            codes={codes}
-            codeApplications={codeApplications.filter((a) => a.language === record.language)}
-            reviewDbError={reviewDbError}
             narrow={records.length > 1}
           />
         ))}
       </div>
+
+      <StepSection
+        number={3}
+        title="Your review"
+        subtitle="One shared review for this scenario, covering every language shown above — record your structured judgment and apply qualitative codes together, then save once. Need a refresher on coding? See the help page."
+      >
+        {reviewDbError ? (
+          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-300 rounded px-3 py-2 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+            Could not load saved reviews: {reviewDbError}
+          </p>
+        ) : (
+          <>
+            {reviewGroups.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Saved reviews for this policy variant ({reviewGroups.length})</h3>
+                {reviewGroups.map((g) => (
+                  <SavedReviewCard
+                    key={g.annotatorName}
+                    annotatorName={g.annotatorName}
+                    annotation={g.annotation}
+                    codeApplications={g.codeApplications}
+                  />
+                ))}
+              </div>
+            )}
+            <ScenarioReviewForm useCase={useCase} scenarioId={id} language={reviewLanguage} policyLabel={reviewPolicyLabel} codes={codes} />
+          </>
+        )}
+      </StepSection>
     </div>
   );
 }
@@ -90,44 +142,16 @@ function LanguagePanel({
   datasetId,
   record,
   variantParam,
-  annotations,
-  codes,
-  codeApplications,
-  reviewDbError,
   narrow,
 }: {
   useCase: UseCase;
   datasetId: DatasetId;
   record: EvaluationRecord;
   variantParam?: string;
-  annotations: Annotation[];
-  codes: Awaited<ReturnType<typeof listCodebookCodes>>;
-  codeApplications: CodeApplicationWithCode[];
-  reviewDbError: string | null;
   narrow: boolean;
 }) {
   const variant: PolicyVariant =
     record.policyVariants.find((v) => v.label === variantParam) ?? record.policyVariants[0];
-
-  const variantAnnotations = annotations.filter((a) => a.policy_label === variant.label);
-  const variantCodeApplications = codeApplications.filter((a) => a.policy_label === variant.label);
-  const annotatorNames = [
-    ...new Set([
-      ...variantAnnotations.map((a) => a.annotator_name),
-      ...variantCodeApplications.map((a) => a.annotator_name),
-    ]),
-  ];
-  const reviewGroups = annotatorNames
-    .map((name) => {
-      const annotation = variantAnnotations.find((a) => a.annotator_name === name) ?? null;
-      const apps = variantCodeApplications.filter((a) => a.annotator_name === name);
-      const latest = [annotation?.updated_at, ...apps.map((a) => a.updated_at)]
-        .filter((d): d is string => Boolean(d))
-        .sort()
-        .at(-1);
-      return { annotatorName: name, annotation, codeApplications: apps, latest: latest ?? "" };
-    })
-    .sort((a, b) => b.latest.localeCompare(a.latest));
 
   const toolSummary = computeScenarioToolSummary(variant);
 
@@ -271,35 +295,6 @@ function LanguagePanel({
               ))}
             </ul>
           </details>
-        )}
-      </StepSection>
-
-      <StepSection
-        number={3}
-        title="Your review"
-        subtitle="Record your structured judgment and apply qualitative codes together, then save once. Need a refresher on coding? See the help page."
-      >
-        {reviewDbError ? (
-          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-300 rounded px-3 py-2 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
-            Could not load saved reviews: {reviewDbError}
-          </p>
-        ) : (
-          <>
-            {reviewGroups.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Saved reviews for this policy variant ({reviewGroups.length})</h3>
-                {reviewGroups.map((g) => (
-                  <SavedReviewCard
-                    key={g.annotatorName}
-                    annotatorName={g.annotatorName}
-                    annotation={g.annotation}
-                    codeApplications={g.codeApplications}
-                  />
-                ))}
-              </div>
-            )}
-            <ScenarioReviewForm useCase={useCase} scenarioId={record.id} language={record.language} policyLabel={variant.label} codes={codes} />
-          </>
         )}
       </StepSection>
     </div>
