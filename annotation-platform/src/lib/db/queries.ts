@@ -9,11 +9,10 @@ export type Annotation = {
   language: string;
   policy_label: string;
   annotator_name: string;
-  agrees_with_verdict: boolean | null;
-  disagreement_reason: string | null;
   evidence_source_type: string | null;
   deduction_reason_category: string | null;
-  evidentiary_attribution_present: boolean | null;
+  judgment_alignment: string | null;
+  alignment_explanation: string | null;
   free_text: string | null;
   confidence: string | null;
   created_at: string;
@@ -26,11 +25,10 @@ export type NewAnnotation = {
   language: string;
   policyLabel: string;
   annotatorName: string;
-  agreesWithVerdict: boolean | null;
-  disagreementReason: string | null;
   evidenceSourceType: string | null;
   deductionReasonCategory: string | null;
-  evidentiaryAttributionPresent: boolean | null;
+  judgmentAlignment: string | null;
+  alignmentExplanation: string | null;
   freeText: string | null;
   confidence: string | null;
 };
@@ -40,12 +38,12 @@ export async function insertAnnotation(input: NewAnnotation): Promise<Annotation
   const rows = await sql`
     INSERT INTO annotations (
       scenario_id, use_case, language, policy_label, annotator_name,
-      agrees_with_verdict, disagreement_reason, evidence_source_type,
-      deduction_reason_category, evidentiary_attribution_present, free_text, confidence
+      evidence_source_type, deduction_reason_category,
+      judgment_alignment, alignment_explanation, free_text, confidence
     ) VALUES (
       ${input.scenarioId}, ${input.useCase}, ${input.language}, ${input.policyLabel}, ${input.annotatorName},
-      ${input.agreesWithVerdict}, ${input.disagreementReason}, ${input.evidenceSourceType},
-      ${input.deductionReasonCategory}, ${input.evidentiaryAttributionPresent}, ${input.freeText}, ${input.confidence}
+      ${input.evidenceSourceType}, ${input.deductionReasonCategory},
+      ${input.judgmentAlignment}, ${input.alignmentExplanation}, ${input.freeText}, ${input.confidence}
     )
     RETURNING *
   `;
@@ -74,11 +72,10 @@ export async function listAnnotationsForUseCase(useCase: UseCase): Promise<Annot
 
 export type UpdateAnnotation = {
   id: number;
-  agreesWithVerdict: boolean | null;
-  disagreementReason: string | null;
   evidenceSourceType: string | null;
   deductionReasonCategory: string | null;
-  evidentiaryAttributionPresent: boolean | null;
+  judgmentAlignment: string | null;
+  alignmentExplanation: string | null;
   freeText: string | null;
   confidence: string | null;
 };
@@ -88,11 +85,10 @@ export async function updateAnnotation(input: UpdateAnnotation): Promise<Annotat
   const rows = await sql`
     UPDATE annotations
     SET
-      agrees_with_verdict = ${input.agreesWithVerdict},
-      disagreement_reason = ${input.disagreementReason},
       evidence_source_type = ${input.evidenceSourceType},
       deduction_reason_category = ${input.deductionReasonCategory},
-      evidentiary_attribution_present = ${input.evidentiaryAttributionPresent},
+      judgment_alignment = ${input.judgmentAlignment},
+      alignment_explanation = ${input.alignmentExplanation},
       free_text = ${input.freeText},
       confidence = ${input.confidence},
       updated_at = now()

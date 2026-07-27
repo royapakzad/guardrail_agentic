@@ -28,6 +28,19 @@ export type EvidenceSourceType = (typeof EVIDENCE_SOURCE_TYPES)[number];
 export type DeductionReasonCategory = (typeof DEDUCTION_REASON_CATEGORIES)[number];
 export type ConfidenceLevel = (typeof CONFIDENCE_LEVELS)[number];
 
+// Part 4 "Your review" -- which guardrail's judgment the annotator's own
+// judgment is more aligned with.
+export const JUDGMENT_ALIGNMENT_OPTIONS = ["agentic", "non-agentic", "none", "both"] as const;
+
+export type JudgmentAlignment = (typeof JUDGMENT_ALIGNMENT_OPTIONS)[number];
+
+export const JUDGMENT_ALIGNMENT_LABELS: Record<JudgmentAlignment, string> = {
+  agentic: "Agentic guardrail",
+  "non-agentic": "Non-agentic guardrail",
+  none: "Neither",
+  both: "Both (not much difference between agentic and non-agentic with mine)",
+};
+
 // Qualitative coding target fields (Issue #57) -- v1 codes at the field level
 // rather than an in-text highlighted span (see the issue's fast-follow note).
 // For the two per-criterion options, the annotator names the specific

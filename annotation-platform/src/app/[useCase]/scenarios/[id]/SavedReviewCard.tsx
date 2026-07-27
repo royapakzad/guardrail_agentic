@@ -3,7 +3,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Annotation, CodeApplicationWithCode } from "@/lib/db/queries";
-import { CODING_TARGET_FIELD_LABELS, type CodingTargetField } from "@/lib/annotationOptions";
+import {
+  CODING_TARGET_FIELD_LABELS,
+  type CodingTargetField,
+  JUDGMENT_ALIGNMENT_OPTIONS,
+  JUDGMENT_ALIGNMENT_LABELS,
+  type JudgmentAlignment,
+} from "@/lib/annotationOptions";
 
 type Props = {
   annotatorName: string;
@@ -38,13 +44,10 @@ export function SavedReviewCard({ annotatorName, annotation, codeApplications }:
   );
 }
 
-function AgreementBadge({ agrees }: { agrees: boolean | null }) {
-  if (agrees === null) return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">not sure</span>;
-  return agrees ? (
-    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">agrees</span>
-  ) : (
-    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">disagrees</span>
-  );
+function AlignmentBadge({ alignment }: { alignment: string | null }) {
+  if (!alignment) return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">no alignment recorded</span>;
+  const label = JUDGMENT_ALIGNMENT_LABELS[alignment as JudgmentAlignment] ?? alignment;
+  return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">aligned with: {label}</span>;
 }
 
 function AnnotationSection({ annotation }: { annotation: Annotation }) {
@@ -59,16 +62,13 @@ function AnnotationSection({ annotation }: { annotation: Annotation }) {
     setStatus("submitting");
     setErrorMessage(null);
     const form = new FormData(e.currentTarget);
-    const agreesRaw = form.get("agreesWithVerdict");
     try {
       const res = await fetch(`/api/annotations/${annotation.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agreesWithVerdict: agreesRaw === "" ? null : agreesRaw === "true",
-          disagreementReason: form.get("disagreementReason") || null,
-          evidentiaryAttributionPresent:
-            form.get("evidentiaryAttributionPresent") === "" ? null : form.get("evidentiaryAttributionPresent") === "true",
+          judgmentAlignment: form.get("judgmentAlignment") || null,
+          alignmentExplanation: form.get("alignmentExplanation") || null,
           freeText: form.get("freeText") || null,
         }),
       });
@@ -105,37 +105,22 @@ function AnnotationSection({ annotation }: { annotation: Annotation }) {
     return (
       <form onSubmit={handleSave} className="flex flex-col gap-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-800">
         <fieldset>
-          <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Agree with the verdict?</legend>
-          <div className="flex gap-4 text-sm">
-            <label className="flex items-center gap-1.5">
-              <input type="radio" name="agreesWithVerdict" value="true" defaultChecked={annotation.agrees_with_verdict === true} /> Agree
-            </label>
-            <label className="flex items-center gap-1.5">
-              <input type="radio" name="agreesWithVerdict" value="false" defaultChecked={annotation.agrees_with_verdict === false} /> Disagree
-            </label>
-            <label className="flex items-center gap-1.5">
-              <input type="radio" name="agreesWithVerdict" value="" defaultChecked={annotation.agrees_with_verdict === null} /> Not sure
-            </label>
+          <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+            Is your judgment more aligned with the agentic guardrail or the non-agentic guardrail?
+          </legend>
+          <div className="flex flex-col gap-1.5 text-sm">
+            {JUDGMENT_ALIGNMENT_OPTIONS.map((option) => (
+              <label key={option} className="flex items-center gap-1.5">
+                <input type="radio" name="judgmentAlignment" value={option} defaultChecked={annotation.judgment_alignment === option} />
+                {JUDGMENT_ALIGNMENT_LABELS[option]}
+              </label>
+            ))}
           </div>
         </fieldset>
         <div>
-          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">If you disagree, why?</label>
-          <input name="disagreementReason" defaultValue={annotation.disagreement_reason ?? ""} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
+          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Explain in a few words</label>
+          <input name="alignmentExplanation" defaultValue={annotation.alignment_explanation ?? ""} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
         </div>
-        <fieldset>
-          <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Evidentiary attribution present?</legend>
-          <div className="flex gap-4 text-sm">
-            <label className="flex items-center gap-1.5">
-              <input type="radio" name="evidentiaryAttributionPresent" value="true" defaultChecked={annotation.evidentiary_attribution_present === true} /> Yes
-            </label>
-            <label className="flex items-center gap-1.5">
-              <input type="radio" name="evidentiaryAttributionPresent" value="false" defaultChecked={annotation.evidentiary_attribution_present === false} /> No
-            </label>
-            <label className="flex items-center gap-1.5">
-              <input type="radio" name="evidentiaryAttributionPresent" value="" defaultChecked={annotation.evidentiary_attribution_present === null} /> N/A
-            </label>
-          </div>
-        </fieldset>
         <div>
           <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Free-text observations</label>
           <textarea name="freeText" defaultValue={annotation.free_text ?? ""} rows={3} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
@@ -156,7 +141,7 @@ function AnnotationSection({ annotation }: { annotation: Annotation }) {
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-2 flex-wrap">
-        <AgreementBadge agrees={annotation.agrees_with_verdict} />
+        <AlignmentBadge alignment={annotation.judgment_alignment} />
         {annotation.confidence && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">confidence: {annotation.confidence}</span>}
         {annotation.evidence_source_type && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">source: {annotation.evidence_source_type}</span>}
         {annotation.deduction_reason_category && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">reason: {annotation.deduction_reason_category}</span>}
@@ -172,7 +157,7 @@ function AnnotationSection({ annotation }: { annotation: Annotation }) {
           )}
         </span>
       </div>
-      {annotation.disagreement_reason && <p className="text-sm text-slate-700 dark:text-slate-300">Disagreement: {annotation.disagreement_reason}</p>}
+      {annotation.alignment_explanation && <p className="text-sm text-slate-700 dark:text-slate-300">{annotation.alignment_explanation}</p>}
       {annotation.free_text && <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{annotation.free_text}</p>}
       {status === "error" && <p className="text-xs text-red-700 dark:text-red-400">{errorMessage}</p>}
     </div>

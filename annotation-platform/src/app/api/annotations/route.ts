@@ -3,7 +3,12 @@ import { insertAnnotation, listAnnotations } from "@/lib/db/queries";
 import { dbErrorResponse } from "@/lib/db/apiError";
 import { USE_CASES } from "@/lib/adapters";
 import type { UseCase } from "@/lib/types";
-import { CONFIDENCE_LEVELS, DEDUCTION_REASON_CATEGORIES, EVIDENCE_SOURCE_TYPES } from "@/lib/annotationOptions";
+import {
+  CONFIDENCE_LEVELS,
+  DEDUCTION_REASON_CATEGORIES,
+  EVIDENCE_SOURCE_TYPES,
+  JUDGMENT_ALIGNMENT_OPTIONS,
+} from "@/lib/annotationOptions";
 
 function isUseCase(value: unknown): value is UseCase {
   return typeof value === "string" && (USE_CASES as string[]).includes(value);
@@ -48,6 +53,9 @@ export async function POST(request: NextRequest) {
   if (body.confidence && !CONFIDENCE_LEVELS.includes(body.confidence)) {
     return NextResponse.json({ error: "Invalid confidence" }, { status: 400 });
   }
+  if (body.judgmentAlignment && !JUDGMENT_ALIGNMENT_OPTIONS.includes(body.judgmentAlignment)) {
+    return NextResponse.json({ error: "Invalid judgmentAlignment" }, { status: 400 });
+  }
 
   try {
     const annotation = await insertAnnotation({
@@ -56,12 +64,10 @@ export async function POST(request: NextRequest) {
       language: String(language),
       policyLabel: String(policyLabel),
       annotatorName: String(annotatorName),
-      agreesWithVerdict: typeof body.agreesWithVerdict === "boolean" ? body.agreesWithVerdict : null,
-      disagreementReason: body.disagreementReason ? String(body.disagreementReason) : null,
       evidenceSourceType: body.evidenceSourceType ?? null,
       deductionReasonCategory: body.deductionReasonCategory ?? null,
-      evidentiaryAttributionPresent:
-        typeof body.evidentiaryAttributionPresent === "boolean" ? body.evidentiaryAttributionPresent : null,
+      judgmentAlignment: body.judgmentAlignment ?? null,
+      alignmentExplanation: body.alignmentExplanation ? String(body.alignmentExplanation) : null,
       freeText: body.freeText ? String(body.freeText) : null,
       confidence: body.confidence ?? null,
     });

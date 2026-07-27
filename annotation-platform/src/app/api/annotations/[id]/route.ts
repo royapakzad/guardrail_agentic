@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateAnnotation, deleteAnnotation } from "@/lib/db/queries";
 import { dbErrorResponse } from "@/lib/db/apiError";
-import { CONFIDENCE_LEVELS, DEDUCTION_REASON_CATEGORIES, EVIDENCE_SOURCE_TYPES } from "@/lib/annotationOptions";
+import {
+  CONFIDENCE_LEVELS,
+  DEDUCTION_REASON_CATEGORIES,
+  EVIDENCE_SOURCE_TYPES,
+  JUDGMENT_ALIGNMENT_OPTIONS,
+} from "@/lib/annotationOptions";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: idParam } = await params;
@@ -24,16 +29,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.confidence && !CONFIDENCE_LEVELS.includes(body.confidence)) {
     return NextResponse.json({ error: "Invalid confidence" }, { status: 400 });
   }
+  if (body.judgmentAlignment && !JUDGMENT_ALIGNMENT_OPTIONS.includes(body.judgmentAlignment)) {
+    return NextResponse.json({ error: "Invalid judgmentAlignment" }, { status: 400 });
+  }
 
   try {
     const annotation = await updateAnnotation({
       id,
-      agreesWithVerdict: typeof body.agreesWithVerdict === "boolean" ? body.agreesWithVerdict : null,
-      disagreementReason: body.disagreementReason ? String(body.disagreementReason) : null,
       evidenceSourceType: body.evidenceSourceType ?? null,
       deductionReasonCategory: body.deductionReasonCategory ?? null,
-      evidentiaryAttributionPresent:
-        typeof body.evidentiaryAttributionPresent === "boolean" ? body.evidentiaryAttributionPresent : null,
+      judgmentAlignment: body.judgmentAlignment ?? null,
+      alignmentExplanation: body.alignmentExplanation ? String(body.alignmentExplanation) : null,
       freeText: body.freeText ? String(body.freeText) : null,
       confidence: body.confidence ?? null,
     });

@@ -4,7 +4,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { UseCase } from "@/lib/types";
 import type { CodebookCode } from "@/lib/db/queries";
-import { CODING_TARGET_FIELDS, CODING_TARGET_FIELD_LABELS } from "@/lib/annotationOptions";
+import {
+  CODING_TARGET_FIELDS,
+  CODING_TARGET_FIELD_LABELS,
+  JUDGMENT_ALIGNMENT_OPTIONS,
+  JUDGMENT_ALIGNMENT_LABELS,
+} from "@/lib/annotationOptions";
 
 type Props = {
   useCase: UseCase;
@@ -95,7 +100,7 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
 
     const form = new FormData(e.currentTarget);
     const annotatorName = String(form.get("annotatorName") ?? "").trim();
-    const agreesRaw = form.get("agreesWithVerdict");
+    const judgmentAlignmentRaw = form.get("judgmentAlignment");
 
     try {
       if (!annotatorName) throw new Error("Your name is required");
@@ -118,12 +123,10 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
         language,
         policyLabel,
         annotatorName,
-        agreesWithVerdict: agreesRaw === "" ? null : agreesRaw === "true",
-        disagreementReason: form.get("disagreementReason") || null,
         evidenceSourceType: null,
         deductionReasonCategory: null,
-        evidentiaryAttributionPresent:
-          form.get("evidentiaryAttributionPresent") === "" ? null : form.get("evidentiaryAttributionPresent") === "true",
+        judgmentAlignment: judgmentAlignmentRaw || null,
+        alignmentExplanation: form.get("alignmentExplanation") || null,
         freeText: form.get("freeText") || null,
         confidence: null,
       };
@@ -178,44 +181,26 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
       </div>
 
       <div className="flex flex-col gap-4">
-        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Your structured judgment</h3>
+        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Your review</h3>
 
         <fieldset>
-          <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Do you agree with the system&apos;s final verdict?</legend>
-          <div className="flex gap-4 text-sm">
-            <label className="flex items-center gap-1.5">
-              <input type="radio" name="agreesWithVerdict" value="true" /> Agree
-            </label>
-            <label className="flex items-center gap-1.5">
-              <input type="radio" name="agreesWithVerdict" value="false" /> Disagree
-            </label>
-            <label className="flex items-center gap-1.5">
-              <input type="radio" name="agreesWithVerdict" value="" defaultChecked /> Not sure
-            </label>
+          <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+            Is your judgment more aligned with the agentic guardrail or the non-agentic guardrail?
+          </legend>
+          <div className="flex flex-col gap-1.5 text-sm">
+            {JUDGMENT_ALIGNMENT_OPTIONS.map((option) => (
+              <label key={option} className="flex items-center gap-1.5">
+                <input type="radio" name="judgmentAlignment" value={option} />
+                {JUDGMENT_ALIGNMENT_LABELS[option]}
+              </label>
+            ))}
           </div>
         </fieldset>
 
         <div>
-          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">If you disagree, why?</label>
-          <input name="disagreementReason" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
+          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Explain in a few words</label>
+          <input name="alignmentExplanation" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100" />
         </div>
-
-        <fieldset>
-          <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-            Does every evidentiary claim in the explanation have a matching tool call in the log?
-          </legend>
-          <div className="flex gap-4 text-sm">
-            <label className="flex items-center gap-1.5">
-              <input type="radio" name="evidentiaryAttributionPresent" value="true" /> Yes
-            </label>
-            <label className="flex items-center gap-1.5">
-              <input type="radio" name="evidentiaryAttributionPresent" value="false" /> No
-            </label>
-            <label className="flex items-center gap-1.5">
-              <input type="radio" name="evidentiaryAttributionPresent" value="" defaultChecked /> N/A
-            </label>
-          </div>
-        </fieldset>
 
         <div>
           <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Free-text observations</label>

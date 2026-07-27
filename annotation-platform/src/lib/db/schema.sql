@@ -10,11 +10,10 @@ CREATE TABLE IF NOT EXISTS annotations (
   language TEXT NOT NULL,
   policy_label TEXT NOT NULL,
   annotator_name TEXT NOT NULL,
-  agrees_with_verdict BOOLEAN,
-  disagreement_reason TEXT,
   evidence_source_type TEXT,
   deduction_reason_category TEXT,
-  evidentiary_attribution_present BOOLEAN,
+  judgment_alignment TEXT,
+  alignment_explanation TEXT,
   free_text TEXT,
   confidence TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -91,3 +90,14 @@ CREATE INDEX IF NOT EXISTS code_applications_code_idx ON code_applications (code
 -- Additive and idempotent -- safe to re-run against an existing database.
 ALTER TABLE annotations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 ALTER TABLE code_applications ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+-- Part 4 "Your review" redesign: replaced the agree/disagree-with-verdict and
+-- evidentiary-attribution fields with a single judgment on whether the
+-- annotator's own read is more aligned with the agentic or non-agentic
+-- guardrail. Destructive -- drops any previously recorded answers for the
+-- fields it replaces.
+ALTER TABLE annotations ADD COLUMN IF NOT EXISTS judgment_alignment TEXT;
+ALTER TABLE annotations ADD COLUMN IF NOT EXISTS alignment_explanation TEXT;
+ALTER TABLE annotations DROP COLUMN IF EXISTS agrees_with_verdict;
+ALTER TABLE annotations DROP COLUMN IF EXISTS disagreement_reason;
+ALTER TABLE annotations DROP COLUMN IF EXISTS evidentiary_attribution_present;
