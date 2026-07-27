@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getRecordsByIdForDataset, USE_CASES, type DatasetId } from "@/lib/adapters";
+import { getRecordsByIdForDataset, USE_CASES } from "@/lib/adapters";
 import { resolveDatasetIdParam } from "@/lib/datasetSelection";
-import type { UseCase, EvaluationRecord, PolicyVariant, JudgePass, AgenticPass } from "@/lib/types";
-import { VerdictBadge } from "@/lib/ui/badges";
+import type { UseCase, EvaluationRecord, PolicyVariant, CriterionVerdict, ToolCall, UrlCheck } from "@/lib/types";
+import { VerdictBadge, ValidBadge } from "@/lib/ui/badges";
 import { UseCaseNav } from "@/lib/ui/UseCaseNav";
 import { listAnnotations, listCodebookCodes, listCodeApplications } from "@/lib/db/queries";
 import type { Annotation, CodeApplicationWithCode } from "@/lib/db/queries";
@@ -14,6 +14,11 @@ import { SavedReviewCard } from "./SavedReviewCard";
 function isUseCase(value: string): value is UseCase {
   return (USE_CASES as string[]).includes(value);
 }
+
+type Panel = {
+  record: EvaluationRecord;
+  variant: PolicyVariant;
+};
 
 export default async function ScenarioDetailPage({
   params,
@@ -76,6 +81,19 @@ export default async function ScenarioDetailPage({
     })
     .sort((a, b) => b.latest.localeCompare(a.latest));
 
+  // Section-major layout: every StepSection below lays out ALL languages side
+  // by side in one row, instead of each language owning one independent
+  // top-to-bottom stack. That's the point -- with a language-major layout, a
+  // long EN response pushes EN's judge table lower than FA's, so "agentic" and
+  // "non-agentic" and "en" and "fa" stop lining up the moment content length
+  // differs. Computing `panels` once, up front, and passing the same array
+  // into each section keeps every row aligned at the same scroll position.
+  const panels: Panel[] = records.map((record) => ({
+    record,
+    variant: record.policyVariants.find((v) => v.label === variantParam) ?? record.policyVariants[0],
+  }));
+  const gridStyle = { gridTemplateColumns: `repeat(${panels.length}, minmax(0, 1fr))` };
+
   return (
     <div className="flex flex-col gap-8">
       <UseCaseNav useCase={useCase} datasetId={String(datasetId)} />
@@ -92,21 +110,85 @@ export default async function ScenarioDetailPage({
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-6 items-start">
-        {records.map((record) => (
-          <LanguagePanel
-            key={record.language}
-            useCase={useCase}
-            datasetId={datasetId}
-            record={record}
-            variantParam={variantParam}
-            narrow={records.length > 1}
-          />
-        ))}
+      {/* Breaks out of the shared <main> max-width -- with N languages times
+          a criterion table times a tool-activity table, this page needs real
+          width to keep everything on one screen without horizontal scrolling
+          inside every card. */}
+      <div className="relative left-1/2 right-1/2 -mx-[50vw] w-screen">
+        <div className="mx-auto max-w-[1800px] px-6 flex flex-col gap-8">
+          <StepSection number={1} title="The case">
+            <div className="grid gap-6" style={gridStyle}>
+              {panels.map(({ record }, i) => (
+                <div key={record.language} className={`flex flex-col gap-4 ${i > 0 ? "md:border-l md:border-slate-200 md:pl-6 dark:md:border-slate-700" : ""}`}>
+                  <LanguageChip language={record.language} />
+                  <div className="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Scenario</div>
+                    <p className="text-sm whitespace-pre-wrap">{record.scenario}</p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
+                      Assistant response {record.assistantModel && <span className="normal-case font-normal">({record.assistantModel})</span>}
+                    </div>
+                    <p className="text-sm whitespace-pre-wrap">{record.assistantResponse}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </StepSection>
+
+          <StepSection
+            number={2}
+            title="Compliance by criterion"
+            subtitle="Compliant vs. not fully compliant, before and after tool access -- no scores. A highlighted row means tool evidence changed the verdict for that criterion."
+          >
+            <div className="grid gap-6" style={gridStyle}>
+              {panels.map(({ record, variant }, i) => (
+                <div key={record.language} className={`flex flex-col gap-3 ${i > 0 ? "md:border-l md:border-slate-200 md:pl-6 dark:md:border-slate-700" : ""}`}>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <LanguageChip language={record.language} />
+                    {record.policyVariants.length > 1 && (
+                      <div className="flex flex-wrap gap-2">
+                        {record.policyVariants.map((v) => (
+                          <Link
+                            key={v.label}
+                            href={`/${useCase}/scenarios/${encodeURIComponent(record.id)}?dataset=${datasetId}&variant=${encodeURIComponent(v.label)}`}
+                            className={`rounded-full border px-3 py-1 text-xs ${
+                              v.label === variant.label
+                                ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
+                                : "border-slate-300 text-slate-600 hover:border-slate-500 dark:border-slate-600 dark:text-slate-400 dark:hover:border-slate-400"
+                            }`}
+                          >
+                            {v.label}
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <ComplianceTable variant={variant} />
+                </div>
+              ))}
+            </div>
+          </StepSection>
+
+          <StepSection
+            number={3}
+            title="Tool activity"
+            subtitle="Every tool call the agentic judge made, and what it returned -- shown as a table by default, not tucked behind a disclosure."
+          >
+            <div className="grid gap-6" style={gridStyle}>
+              {panels.map(({ record, variant }, i) => (
+                <div key={record.language} className={`flex flex-col gap-3 ${i > 0 ? "md:border-l md:border-slate-200 md:pl-6 dark:md:border-slate-700" : ""}`}>
+                  <LanguageChip language={record.language} />
+                  <ToolActivity variant={variant} />
+                </div>
+              ))}
+            </div>
+          </StepSection>
+        </div>
       </div>
 
       <StepSection
-        number={3}
+        number={4}
         title="Your review"
         subtitle="One shared review for this scenario, covering every language shown above — record your structured judgment and apply qualitative codes together, then save once. Need a refresher on coding? See the help page."
       >
@@ -137,167 +219,11 @@ export default async function ScenarioDetailPage({
   );
 }
 
-function LanguagePanel({
-  useCase,
-  datasetId,
-  record,
-  variantParam,
-  narrow,
-}: {
-  useCase: UseCase;
-  datasetId: DatasetId;
-  record: EvaluationRecord;
-  variantParam?: string;
-  narrow: boolean;
-}) {
-  const variant: PolicyVariant =
-    record.policyVariants.find((v) => v.label === variantParam) ?? record.policyVariants[0];
-
-  const toolSummary = computeScenarioToolSummary(variant);
-
+function LanguageChip({ language }: { language: string }) {
   return (
-    <div className={`flex flex-col gap-8 ${narrow ? "flex-1 min-w-[420px]" : "w-full"}`}>
-      <div className="flex items-center gap-2">
-        <span className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold uppercase text-white dark:bg-slate-100 dark:text-slate-900">
-          {record.language}
-        </span>
-        {record.policyVariants.length > 1 && (
-          <div className="flex flex-wrap gap-2">
-            {record.policyVariants.map((v) => (
-              <Link
-                key={v.label}
-                href={`/${useCase}/scenarios/${encodeURIComponent(record.id)}?dataset=${datasetId}&variant=${encodeURIComponent(v.label)}`}
-                className={`rounded-full border px-3 py-1 text-xs ${
-                  v.label === variant.label
-                    ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
-                    : "border-slate-300 text-slate-600 hover:border-slate-500 dark:border-slate-600 dark:text-slate-400 dark:hover:border-slate-400"
-                }`}
-              >
-                {v.label}
-              </Link>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <StepSection number={1} title="The case">
-        <section className="flex flex-col gap-4">
-          <div className="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Scenario</div>
-            <p className="text-sm whitespace-pre-wrap">{record.scenario}</p>
-          </div>
-          <div className="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
-              Assistant response {record.assistantModel && <span className="normal-case font-normal">({record.assistantModel})</span>}
-            </div>
-            <p className="text-sm whitespace-pre-wrap">{record.assistantResponse}</p>
-          </div>
-        </section>
-      </StepSection>
-
-      <StepSection number={2} title="Judge evaluation" subtitle="What the automated judge already found — read this before writing your review below.">
-        <section className="flex flex-col gap-4">
-          <JudgePanel title="Non-agentic (full policy, no tools)" pass={variant.nonagentic} />
-          <JudgePanel title="Agentic (split-criteria, tool-verified)" pass={variant.agentic} agentic />
-        </section>
-
-        {toolSummary.totalToolCalls > 0 && (
-          <div className="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 flex flex-col gap-3">
-            <div>
-              <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
-                Tools called in this scenario ({toolSummary.totalToolCalls})
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {toolSummary.toolCounts.map((t) => (
-                  <span
-                    key={t.tool}
-                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-mono text-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                  >
-                    {t.tool} <span className="font-semibold">×{t.count}</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {toolSummary.domains.length > 0 && (
-              <div>
-                <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
-                  Domains touched ({toolSummary.domains.length} distinct · {toolSummary.totalUrlCount} URL touches · {toolSummary.distinctUrlCount} distinct URLs)
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {toolSummary.domains.map((d) => (
-                    <span
-                      key={d.domain}
-                      className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-xs font-mono text-sky-800 dark:bg-sky-950/40 dark:text-sky-300"
-                    >
-                      {d.domain} <span className="font-semibold">×{d.count}</span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {variant.agentic.toolCallLog.length > 0 && (
-          <details className="rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
-            <summary className="cursor-pointer px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300">
-              Tool call log ({variant.agentic.toolCallLog.length})
-            </summary>
-            <div className="flex flex-col gap-2 p-4 pt-0">
-              {variant.agentic.toolCallLog.map((call, i) => (
-                <div key={i} className="rounded border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-800">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="font-mono font-medium text-slate-800 dark:text-slate-200">
-                      {call.call_number ? `#${call.call_number} ` : ""}
-                      {call.tool}
-                    </div>
-                    {call.timestamp && (
-                      <span className="text-slate-400 dark:text-slate-500 shrink-0">{new Date(call.timestamp).toLocaleTimeString()}</span>
-                    )}
-                  </div>
-                  {call.check_purpose && <div className="mt-1 text-slate-500 dark:text-slate-400 italic">{call.check_purpose}</div>}
-                  {call.input && <div className="mt-1 text-slate-600 dark:text-slate-400 font-mono break-words">{JSON.stringify(call.input)}</div>}
-                  {call.output_preview && (
-                    <div className="mt-1 text-slate-500 dark:text-slate-400 font-mono break-words">{String(call.output_preview).slice(0, 300)}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
-
-        {variant.agentic.urlChecks.length > 0 && (
-          <details className="rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
-            <summary className="cursor-pointer px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300">
-              URL checks ({variant.agentic.urlChecks.length})
-            </summary>
-            <ul className="flex flex-col gap-1 p-4 pt-0 text-sm">
-              {variant.agentic.urlChecks.map((u, i) => (
-                <li key={i} className="font-mono">
-                  {u.valid ? "✓" : "✗"} {u.url} {u.status_code ? `(HTTP ${u.status_code})` : ""}
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
-
-        {variant.agentic.claimChecks.length > 0 && (
-          <details className="rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
-            <summary className="cursor-pointer px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300">
-              Claim checks ({variant.agentic.claimChecks.length})
-            </summary>
-            <ul className="flex flex-col gap-1 p-4 pt-0 text-sm">
-              {variant.agentic.claimChecks.map((c, i) => (
-                <li key={i}>
-                  <span className="font-medium">{c.status}</span> — {c.claim}
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
-      </StepSection>
-    </div>
+    <span className="inline-flex w-fit rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold uppercase text-white dark:bg-slate-100 dark:text-slate-900">
+      {language}
+    </span>
   );
 }
 
@@ -326,61 +252,237 @@ function StepSection({
   );
 }
 
-function JudgePanel({ title, pass, agentic }: { title: string; pass: JudgePass | AgenticPass; agentic?: boolean }) {
-  const ag = agentic ? (pass as AgenticPass) : null;
-  const compliantCount = pass.criteriaVerdicts.filter((c) => c.verdict === "COMPLIANT").length;
-  const total = pass.criteriaVerdicts.length;
+/**
+ * One row per policy criterion, matching the non-agentic (no tools) verdict
+ * against the agentic (with tools) verdict for that same criterion. This
+ * replaces two separate stacked judge cards -- putting both verdicts in the
+ * same row is what actually answers "did tool access change this," instead
+ * of asking the reader to hold both cards in their head while scrolling.
+ * No score or score arithmetic is shown anywhere in this table, by design.
+ */
+function ComplianceTable({ variant }: { variant: PolicyVariant }) {
+  const agenticByCriterion = new Map(variant.agentic.criteriaVerdicts.map((c) => [c.criterion, c]));
+  const changedCriteria = new Set(variant.agentic.toolChangedVerdictFor ?? []);
+  const rows = variant.nonagentic.criteriaVerdicts.map((naC) => ({
+    criterion: naC.criterion,
+    nonagentic: naC,
+    agentic: agenticByCriterion.get(naC.criterion) ?? naC,
+  }));
+
+  if (rows.length === 0) {
+    return <p className="text-sm text-slate-400 dark:text-slate-500">No criteria returned for this judge/policy.</p>;
+  }
+
   return (
-    <div className="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-sm dark:text-slate-100">{title}</h3>
-        {total > 0 && (
-          <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">{compliantCount}/{total} compliant</span>
-        )}
+    <div className="flex flex-col gap-2">
+      <div className="text-xs text-slate-500 dark:text-slate-400">
+        {variant.agentic.toolCallsMade ?? variant.agentic.toolCallLog.length} tool call(s)
+        {variant.agentic.judgmentTimeS !== null ? ` · ${variant.agentic.judgmentTimeS.toFixed(1)}s` : ""}
       </div>
-      {ag && (
-        <div className="text-xs text-slate-500 dark:text-slate-400">
-          {ag.toolCallsMade ?? ag.toolCallLog.length} tool call(s)
-          {ag.judgmentTimeS !== null ? ` · ${ag.judgmentTimeS.toFixed(1)}s` : ""}
-        </div>
-      )}
-      {pass.criteriaVerdicts.length > 0 && (
-        <div className="flex flex-col gap-1">
-          {pass.criteriaVerdicts.map((c, i) => (
-            <div key={i} className="flex flex-col gap-0.5 text-xs">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-slate-700 dark:text-slate-300">{c.criterion}</span>
-                <VerdictBadge verdict={c.verdict} />
-              </div>
-              {Array.isArray(c.tools_used) && c.tools_used.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {c.tools_used.map((t, j) => (
-                    <span
-                      key={j}
-                      className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400"
-                    >
-                      {String(t)}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {typeof c.human_review_needed === "string" && c.human_review_needed && (
-                <div className="text-amber-800 dark:text-amber-300">
-                  <span className="font-medium">Review: </span>
-                  {c.human_review_needed}
-                </div>
-              )}
-              {typeof c.suggested_improvement === "string" && c.suggested_improvement && (
-                <div className="text-slate-600 dark:text-slate-400">
-                  <span className="font-medium">Suggested fix: </span>
-                  {c.suggested_improvement}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-      <p className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap">{pass.explanation}</p>
+      <div className="overflow-x-auto rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50 text-left dark:border-slate-700 dark:bg-slate-800">
+              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Criterion</th>
+              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">No tools</th>
+              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">With tools</th>
+              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Tools used</th>
+              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">What the tool found</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const changed = changedCriteria.has(row.criterion) || row.nonagentic.verdict !== row.agentic.verdict;
+              return (
+                <tr
+                  key={row.criterion}
+                  className={`border-b border-slate-100 last:border-0 align-top dark:border-slate-800 ${
+                    changed ? "bg-sky-50/60 dark:bg-sky-950/20" : ""
+                  }`}
+                >
+                  <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-200">
+                    {row.criterion}
+                    {changed && (
+                      <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">
+                        Changed by tool evidence
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap"><VerdictBadge verdict={row.nonagentic.verdict} /></td>
+                  <td className="px-3 py-2 whitespace-nowrap"><VerdictBadge verdict={row.agentic.verdict} /></td>
+                  <td className="px-3 py-2">
+                    <ToolChips tools={row.agentic.tools_used} />
+                  </td>
+                  <td className="px-3 py-2 max-w-md">
+                    <Evidence criterion={row.agentic} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
+}
+
+function ToolChips({ tools }: { tools?: string[] }) {
+  if (!Array.isArray(tools) || tools.length === 0) return <span className="text-slate-300 dark:text-slate-600">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {tools.map((t, i) => (
+        <span key={i} className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+          {t}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function Evidence({ criterion }: { criterion: CriterionVerdict }) {
+  const review = typeof criterion.human_review_needed === "string" ? criterion.human_review_needed : "";
+  const fix = typeof criterion.suggested_improvement === "string" ? criterion.suggested_improvement : "";
+  if (!review && !fix) return <span className="text-slate-300 dark:text-slate-600">—</span>;
+  return (
+    <div className="flex flex-col gap-1 text-xs">
+      {review && <div className="text-slate-700 dark:text-slate-300">{review}</div>}
+      {fix && (
+        <div className="text-amber-800 dark:text-amber-300">
+          <span className="font-medium">Fix: </span>
+          {fix}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * All tool calls for this variant's agentic pass as one always-visible table
+ * (no <details> collapse). check_url_validity calls are cross-referenced
+ * against urlChecks so the result column shows a VALID/INVALID badge instead
+ * of a raw JSON preview.
+ */
+function ToolActivity({ variant }: { variant: PolicyVariant }) {
+  const toolSummary = computeScenarioToolSummary(variant);
+  const urlByNormalizedUrl = new Map(
+    variant.agentic.urlChecks.map((u) => [normalizeUrl(u.url), u] as const)
+  );
+
+  if (toolSummary.totalToolCalls === 0) {
+    return <p className="text-sm text-slate-400 dark:text-slate-500">No tool calls for this variant.</p>;
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap gap-2">
+        {toolSummary.toolCounts.map((t) => (
+          <span
+            key={t.tool}
+            className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-mono text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+          >
+            {t.tool} <span className="font-semibold">×{t.count}</span>
+          </span>
+        ))}
+        {toolSummary.domains.length > 0 && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+            {toolSummary.domains.length} domains · {toolSummary.totalUrlCount} URL touches · {toolSummary.distinctUrlCount} distinct
+          </span>
+        )}
+      </div>
+
+      <div className="overflow-x-auto rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50 text-left dark:border-slate-700 dark:bg-slate-800">
+              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 w-10">#</th>
+              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Tool</th>
+              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Input</th>
+              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {variant.agentic.toolCallLog.map((call, i) => (
+              <ToolActivityRow key={i} call={call} urlByNormalizedUrl={urlByNormalizedUrl} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {variant.agentic.claimChecks.length > 0 && (
+        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50 text-left dark:border-slate-700 dark:bg-slate-800">
+                <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 w-28">Status</th>
+                <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Claim</th>
+              </tr>
+            </thead>
+            <tbody>
+              {variant.agentic.claimChecks.map((c, i) => (
+                <tr key={i} className="border-b border-slate-100 last:border-0 align-top dark:border-slate-800">
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <ClaimStatusBadge status={c.status} />
+                  </td>
+                  <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{c.claim}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function normalizeUrl(url?: string): string {
+  return (url ?? "").trim().replace(/[*`]+$/, "");
+}
+
+function ToolActivityRow({
+  call,
+  urlByNormalizedUrl,
+}: {
+  call: ToolCall;
+  urlByNormalizedUrl: Map<string, UrlCheck>;
+}) {
+  const inputUrl = typeof call.input?.url === "string" ? call.input.url : undefined;
+  const urlCheck = call.tool === "check_url_validity" && inputUrl ? urlByNormalizedUrl.get(normalizeUrl(inputUrl)) : undefined;
+
+  return (
+    <tr className="border-b border-slate-100 last:border-0 align-top dark:border-slate-800">
+      <td className="px-3 py-2 text-slate-400 dark:text-slate-500 tabular-nums">{call.call_number ?? "—"}</td>
+      <td className="px-3 py-2 font-mono text-xs font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap">
+        {call.tool}
+        {call.check_purpose && <div className="font-sans italic font-normal text-slate-400 dark:text-slate-500">{call.check_purpose}</div>}
+      </td>
+      <td className="px-3 py-2 font-mono text-xs text-slate-600 dark:text-slate-400 break-words max-w-xs">
+        {call.input ? JSON.stringify(call.input) : "—"}
+      </td>
+      <td className="px-3 py-2 text-xs max-w-md">
+        {urlCheck ? (
+          <div className="flex flex-col gap-1">
+            <ValidBadge valid={urlCheck.valid ?? null} />
+            {urlCheck.status_code !== undefined && urlCheck.status_code !== null && (
+              <span className="font-mono text-slate-500 dark:text-slate-400">HTTP {urlCheck.status_code}</span>
+            )}
+          </div>
+        ) : (
+          <span className="font-mono text-slate-600 dark:text-slate-400 break-words">
+            {String(call.output_preview ?? "").slice(0, 220)}
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+const CLAIM_STATUS_COLORS: Record<string, string> = {
+  verified: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
+  contradicted: "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300",
+  unverifiable: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
+};
+
+function ClaimStatusBadge({ status }: { status: string }) {
+  const cls = CLAIM_STATUS_COLORS[status] ?? "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400";
+  return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>{status}</span>;
 }
