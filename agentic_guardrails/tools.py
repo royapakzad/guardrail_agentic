@@ -409,7 +409,17 @@ def check_url_validity(url: str) -> dict:
     Slow government/NGO portals (OFAC, UNHCR, OFPRA) time out frequently under
     automated requests.  Before PR #17 these were marked valid=False and incurred
     an unfair −0.15 deduction.  The timed_out state tells the judge not to deduct.
+
+    `url` is normalized before the request: judge models frequently draft the
+    response with the URL wrapped in markdown (**bold** or `code`), and when the
+    judge later copies that span verbatim into a tool call, the trailing `*` or
+    backtick becomes part of the literal request target — a real, live domain
+    then fails DNS resolution and gets scored as a broken link. Stripping this
+    here (in addition to the same fix at extraction time in agentic_runner.py)
+    catches it regardless of whether the model called this tool directly with a
+    hand-typed URL or the URL arrived via pre-run regex extraction.
     """
+    url = (url or "").strip().strip("*`").strip()
     try:
         import requests
     except ImportError as exc:

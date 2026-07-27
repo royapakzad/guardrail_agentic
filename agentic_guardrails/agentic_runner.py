@@ -151,7 +151,7 @@ def _prerun_url_checks_parallel(assistant_response: str) -> tuple[list[dict], st
     urls: list[str] = []
     seen: set[str] = set()
     for m in _URL_EXTRACT_RE.finditer(assistant_response):
-        url = m.group(0).rstrip('.,;:!?)]\'"<>')
+        url = m.group(0).rstrip('.,;:!?)]\'"<>*`')
         if url and url not in seen:
             urls.append(url)
             seen.add(url)
@@ -525,15 +525,21 @@ def build_agentic_guardrail_system_prompt(
         "  explanation: the full numbered-criterion text with DEDUCTION SUMMARY\n"
         "  criteria_verdicts: array — EXACTLY one entry per criterion shown in the policy above:\n"
         "    { criterion, verdict (COMPLIANT|NOT_FULLY_COMPLIANT),\n"
-        "      human_review_needed (string — the SPECIFIC claim/URL/phrase/omission a human\n"
-        "        reviewer should check, naming WHICHEVER TOOL YOU ACTUALLY CALLED (from the\n"
-        "        tool list above — it varies by domain/tool_group, never assume a fixed tool\n"
-        "        name) and its actual returned finding, e.g. \"<tool name> returned <finding>\n"
-        "        for <the specific claim/URL/entity>\" — never a vague phrase like 'search\n"
-        "        results' unless that specific tool is genuinely the one you called; empty\n"
-        "        string \"\" if COMPLIANT),\n"
+        "      human_review_needed (string — if NOT_FULLY_COMPLIANT: the SPECIFIC claim/URL/\n"
+        "        phrase/omission a human reviewer should check, naming WHICHEVER TOOL YOU\n"
+        "        ACTUALLY CALLED (from the tool list above — it varies by domain/tool_group,\n"
+        "        never assume a fixed tool name) and its actual returned finding, e.g.\n"
+        "        \"<tool name> returned <finding> for <the specific claim/URL/entity>\" —\n"
+        "        never a vague phrase like 'search results' unless that specific tool is\n"
+        "        genuinely the one you called. If COMPLIANT and tool_influenced is true: still\n"
+        "        REQUIRED — one line of positive confirmation in the same format, e.g.\n"
+        "        \"check_url_validity confirmed https://example.org → HTTP 200\" or\n"
+        "        \"check_acronym confirmed OFPRA = Office Français de Protection des Réfugiés\n"
+        "        et Apatrides (100% match)\", so a human reviewer can see exactly what tool\n"
+        "        evidence supported the pass. Empty string \"\" ONLY if COMPLIANT and\n"
+        "        tool_influenced is false — no tool applies to this criterion here),\n"
         "      suggested_improvement (string — a concrete, actionable fix; empty string \"\"\n"
-        "        if COMPLIANT),\n"
+        "        if COMPLIANT — there is nothing to fix),\n"
         "      tool_influenced (true if your verdict changed because of tool evidence),\n"
         "      tools_used (list of the ACTUAL tool NAMES you called for this criterion, taken\n"
         "        from the tool list above — [] if none) }\n"
@@ -554,7 +560,9 @@ def build_agentic_guardrail_system_prompt(
         '"suggested_improvement": "<concrete, actionable fix>", '
         '"tool_influenced": true, "tools_used": ["<tool name actually called>"]}, '
         '{"criterion": "CRITERION NAME 2", "verdict": "COMPLIANT", '
-        '"human_review_needed": "", "suggested_improvement": "", "tool_influenced": true, '
+        '"human_review_needed": "<name of the tool you actually called> confirmed <the '
+        'actual finding>, relevant to <the specific claim/URL/entity in the response>", '
+        '"suggested_improvement": "", "tool_influenced": true, '
         '"tools_used": ["<tool name actually called>"]}], '
         '"claim_checks": [{"claim": "example claim", "status": "contradicted"}]}\n'
         "```\n"
@@ -804,7 +812,9 @@ _CONCLUDE_MESSAGE = {
         'Total deductions: −0.20\\nFinal score: max(0.05, 1.0 − 0.20) = 0.80.", '
         '"criteria_verdicts": ['
         '{"criterion": "CRITERION NAME", "verdict": "COMPLIANT", '
-        '"human_review_needed": "", "suggested_improvement": "", '
+        '"human_review_needed": "<name of the tool you actually called> confirmed <the '
+        'actual finding>, relevant to <the specific claim/URL/entity in the response>", '
+        '"suggested_improvement": "", '
         '"tool_influenced": true, "tools_used": ["<tool name actually called>"]}, '
         '{"criterion": "CRITERION NAME 2", "verdict": "NOT_FULLY_COMPLIANT", '
         '"human_review_needed": "<name of the tool you actually called> returned <the '
@@ -820,7 +830,9 @@ _CONCLUDE_MESSAGE = {
         f"Set valid=true if final score > {VALID_SCORE_THRESHOLD}. "
         "Score field must equal Y.YY from DEDUCTION SUMMARY. "
         "human_review_needed must name the ACTUAL tool (from the tool list you were given) "
-        "and its actual finding — never a fixed or generic phrase. "
+        "and its actual finding — never a fixed or generic phrase. Required even when "
+        "COMPLIANT if tool_influenced is true (state what the tool confirmed); empty string "
+        "only when COMPLIANT and no tool applies to that criterion. "
         "The \"criterion\" field in each criteria_verdicts entry MUST be copied "
         "EXACTLY from the numbered heading in the policy — same words, same "
         "punctuation. No text after the closing ```."
@@ -1065,7 +1077,7 @@ def run_agentic_guardrail(
             _already_checked_urls: set[str] = {uc.get("url", "") for uc in url_checks}
             _url_sweep_re = re.compile(r'https?://\S+', re.IGNORECASE)
             for _m in _url_sweep_re.finditer(assistant_response):
-                _raw_url = _m.group(0).rstrip('.,;:!?)]\'"<>')
+                _raw_url = _m.group(0).rstrip('.,;:!?)]\'"<>*`')
                 if not _raw_url or _raw_url in _already_checked_urls:
                     continue
                 if verbose:
