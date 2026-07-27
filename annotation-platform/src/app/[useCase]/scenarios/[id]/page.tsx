@@ -1,12 +1,13 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getRecordByIdForDataset, USE_CASES } from "@/lib/adapters";
+import { getRecordsByIdForDataset, USE_CASES, type DatasetId } from "@/lib/adapters";
 import { resolveDatasetIdParam } from "@/lib/datasetSelection";
-import type { UseCase, PolicyVariant, JudgePass, AgenticPass } from "@/lib/types";
+import type { UseCase, EvaluationRecord, PolicyVariant, JudgePass, AgenticPass } from "@/lib/types";
 import { VerdictBadge } from "@/lib/ui/badges";
 import { UseCaseNav } from "@/lib/ui/UseCaseNav";
 import { listAnnotations, listCodebookCodes, listCodeApplications } from "@/lib/db/queries";
 import type { Annotation, CodeApplicationWithCode } from "@/lib/db/queries";
+import { computeScenarioToolSummary } from "@/lib/metrics";
 import { ScenarioReviewForm } from "./ScenarioReviewForm";
 import { SavedReviewCard } from "./SavedReviewCard";
 
@@ -19,20 +20,20 @@ export default async function ScenarioDetailPage({
   searchParams,
 }: {
   params: Promise<{ useCase: string; id: string }>;
-  searchParams: Promise<{ lang?: string; variant?: string; dataset?: string }>;
+  searchParams: Promise<{ variant?: string; dataset?: string }>;
 }) {
   const { useCase: useCaseParam, id: idParam } = await params;
-  const { lang, variant: variantParam, dataset: datasetParam } = await searchParams;
+  const { variant: variantParam, dataset: datasetParam } = await searchParams;
   if (!isUseCase(useCaseParam)) notFound();
   const useCase = useCaseParam;
   const id = decodeURIComponent(idParam);
 
   const datasetId = await resolveDatasetIdParam(useCase, datasetParam);
-  const record = await getRecordByIdForDataset(useCase, datasetId, id, lang);
-  if (!record) notFound();
-
-  const variant: PolicyVariant =
-    record.policyVariants.find((v) => v.label === variantParam) ?? record.policyVariants[0];
+  // All language variants of this one scenario id (e.g. "IR01" in en + fa),
+  // shown side by side below so language-related judgment differences can be
+  // compared without navigating between pages.
+  const records = await getRecordsByIdForDataset(useCase, datasetId, id);
+  if (records.length === 0) notFound();
 
   let annotations: Annotation[] = [];
   let codes: Awaited<ReturnType<typeof listCodebookCodes>> = [];
@@ -40,13 +41,73 @@ export default async function ScenarioDetailPage({
   let reviewDbError: string | null = null;
   try {
     [annotations, codes, codeApplications] = await Promise.all([
-      listAnnotations(useCase, record.id),
+      listAnnotations(useCase, id),
       listCodebookCodes(useCase),
-      listCodeApplications(useCase, record.id),
+      listCodeApplications(useCase, id),
     ]);
   } catch (err) {
     reviewDbError = err instanceof Error ? err.message : "Could not load saved reviews";
   }
+
+  return (
+    <div className="flex flex-col gap-8">
+      <UseCaseNav useCase={useCase} datasetId={String(datasetId)} />
+
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">{id}</h1>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+          <Link href={`/${useCase}/scenarios?dataset=${datasetId}`} className="underline">back to scenario list</Link>
+          {records.length > 1 && (
+            <span className="ml-2 text-slate-400 dark:text-slate-500">
+              · {records.length} languages shown side by side: {records.map((r) => r.language.toUpperCase()).join(", ")}
+            </span>
+          )}
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-6 items-start">
+        {records.map((record) => (
+          <LanguagePanel
+            key={record.language}
+            useCase={useCase}
+            datasetId={datasetId}
+            record={record}
+            variantParam={variantParam}
+            annotations={annotations.filter((a) => a.language === record.language)}
+            codes={codes}
+            codeApplications={codeApplications.filter((a) => a.language === record.language)}
+            reviewDbError={reviewDbError}
+            narrow={records.length > 1}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LanguagePanel({
+  useCase,
+  datasetId,
+  record,
+  variantParam,
+  annotations,
+  codes,
+  codeApplications,
+  reviewDbError,
+  narrow,
+}: {
+  useCase: UseCase;
+  datasetId: DatasetId;
+  record: EvaluationRecord;
+  variantParam?: string;
+  annotations: Annotation[];
+  codes: Awaited<ReturnType<typeof listCodebookCodes>>;
+  codeApplications: CodeApplicationWithCode[];
+  reviewDbError: string | null;
+  narrow: boolean;
+}) {
+  const variant: PolicyVariant =
+    record.policyVariants.find((v) => v.label === variantParam) ?? record.policyVariants[0];
 
   const variantAnnotations = annotations.filter((a) => a.policy_label === variant.label);
   const variantCodeApplications = codeApplications.filter((a) => a.policy_label === variant.label);
@@ -68,39 +129,35 @@ export default async function ScenarioDetailPage({
     })
     .sort((a, b) => b.latest.localeCompare(a.latest));
 
-  return (
-    <div className="flex flex-col gap-8">
-      <UseCaseNav useCase={useCase} datasetId={String(datasetId)} />
+  const toolSummary = computeScenarioToolSummary(variant);
 
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {record.id} <span className="text-slate-400 dark:text-slate-500 font-normal uppercase text-base">{record.language}</span>
-        </h1>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          <Link href={`/${useCase}/scenarios?dataset=${datasetId}`} className="underline">back to scenario list</Link>
-        </p>
+  return (
+    <div className={`flex flex-col gap-8 ${narrow ? "flex-1 min-w-[420px]" : "w-full"}`}>
+      <div className="flex items-center gap-2">
+        <span className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold uppercase text-white dark:bg-slate-100 dark:text-slate-900">
+          {record.language}
+        </span>
+        {record.policyVariants.length > 1 && (
+          <div className="flex flex-wrap gap-2">
+            {record.policyVariants.map((v) => (
+              <Link
+                key={v.label}
+                href={`/${useCase}/scenarios/${encodeURIComponent(record.id)}?dataset=${datasetId}&variant=${encodeURIComponent(v.label)}`}
+                className={`rounded-full border px-3 py-1 text-xs ${
+                  v.label === variant.label
+                    ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
+                    : "border-slate-300 text-slate-600 hover:border-slate-500 dark:border-slate-600 dark:text-slate-400 dark:hover:border-slate-400"
+                }`}
+              >
+                {v.label}
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
 
-      {record.policyVariants.length > 1 && (
-        <div className="flex flex-wrap gap-2">
-          {record.policyVariants.map((v) => (
-            <Link
-              key={v.label}
-              href={`/${useCase}/scenarios/${encodeURIComponent(record.id)}?lang=${record.language}&dataset=${datasetId}&variant=${encodeURIComponent(v.label)}`}
-              className={`rounded-full border px-3 py-1 text-xs ${
-                v.label === variant.label
-                  ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
-                  : "border-slate-300 text-slate-600 hover:border-slate-500 dark:border-slate-600 dark:text-slate-400 dark:hover:border-slate-400"
-              }`}
-            >
-              {v.label}
-            </Link>
-          ))}
-        </div>
-      )}
-
       <StepSection number={1} title="The case">
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <section className="flex flex-col gap-4">
           <div className="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Scenario</div>
             <p className="text-sm whitespace-pre-wrap">{record.scenario}</p>
@@ -115,10 +172,48 @@ export default async function ScenarioDetailPage({
       </StepSection>
 
       <StepSection number={2} title="Judge evaluation" subtitle="What the automated judge already found — read this before writing your review below.">
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <section className="flex flex-col gap-4">
           <JudgePanel title="Non-agentic (full policy, no tools)" pass={variant.nonagentic} />
           <JudgePanel title="Agentic (split-criteria, tool-verified)" pass={variant.agentic} agentic />
         </section>
+
+        {toolSummary.totalToolCalls > 0 && (
+          <div className="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 flex flex-col gap-3">
+            <div>
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
+                Tools called in this scenario ({toolSummary.totalToolCalls})
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {toolSummary.toolCounts.map((t) => (
+                  <span
+                    key={t.tool}
+                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-mono text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                  >
+                    {t.tool} <span className="font-semibold">×{t.count}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {toolSummary.domains.length > 0 && (
+              <div>
+                <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
+                  Domains touched ({toolSummary.domains.length} distinct · {toolSummary.totalUrlCount} URL touches · {toolSummary.distinctUrlCount} distinct URLs)
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {toolSummary.domains.map((d) => (
+                    <span
+                      key={d.domain}
+                      className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-xs font-mono text-sky-800 dark:bg-sky-950/40 dark:text-sky-300"
+                    >
+                      {d.domain} <span className="font-semibold">×{d.count}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {variant.agentic.toolCallLog.length > 0 && (
           <details className="rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">

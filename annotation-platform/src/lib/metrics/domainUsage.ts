@@ -1,4 +1,4 @@
-import type { EvaluationRecord, ToolCall } from "@/lib/types";
+import type { EvaluationRecord, PolicyVariant, ToolCall } from "@/lib/types";
 import { flattenVariants, groupByLabel } from "./flatten";
 
 export type DomainCount = { domain: string; count: number };
@@ -111,4 +111,43 @@ export function computeDomainUsage(records: EvaluationRecord[]): DomainUsageSumm
   }
 
   return summaries.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+export type ToolCount = { tool: string; count: number };
+
+export type ScenarioToolSummary = {
+  /** How many times each tool was called for this one scenario/policy variant. */
+  toolCounts: ToolCount[];
+  totalToolCalls: number;
+  /** Every domain touched by this variant's agentic pass (search results, fetch/check
+   * inputs, and any URL embedded in a domain-specific tool's own output). */
+  domains: DomainCount[];
+  totalUrlCount: number;
+  distinctUrlCount: number;
+};
+
+/** Per-scenario counterpart to computeDomainUsage/computeToolUsage — both of
+ * those aggregate across an entire dataset grouped by policy label; this is
+ * for the scenario detail page, which needs the same tool-call and
+ * domain-touch counts for just one record's one policy variant. */
+export function computeScenarioToolSummary(variant: PolicyVariant): ScenarioToolSummary {
+  const toolCounts = new Map<string, number>();
+  const allUrls: string[] = [];
+
+  for (const call of variant.agentic.toolCallLog) {
+    toolCounts.set(call.tool, (toolCounts.get(call.tool) ?? 0) + 1);
+    allUrls.push(...extractUrls(call));
+  }
+
+  const { counts, distinctUrls } = tally(allUrls);
+
+  return {
+    toolCounts: [...toolCounts.entries()]
+      .map(([tool, count]) => ({ tool, count }))
+      .sort((a, b) => b.count - a.count),
+    totalToolCalls: variant.agentic.toolCallLog.length,
+    domains: counts,
+    totalUrlCount: allUrls.length,
+    distinctUrlCount: distinctUrls.size,
+  };
 }
