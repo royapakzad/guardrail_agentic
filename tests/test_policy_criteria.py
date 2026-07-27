@@ -129,48 +129,6 @@ def test_split_tagged_policy_empty_half_when_nothing_matches():
     assert "TONE, DIGNITY, AND EMPATHY" in nontool_text
 
 
-def test_split_per_criterion_returns_one_entry_per_criterion():
-    entries = pc.split_per_criterion(SAMPLE_POLICY)
-    assert [e["name"] for e in entries] == [
-        "ACTIONABILITY AND PRACTICALITY",
-        "FACTUALITY AND ACCURACY",
-        "SAFETY, SECURITY, AND PRIVACY",
-        "TONE, DIGNITY, AND EMPATHY",
-    ]
-    assert [e["needs_tools"] for e in entries] == [True, True, False, False]
-
-
-def test_split_per_criterion_policy_text_contains_only_that_criterion():
-    entries = pc.split_per_criterion(SAMPLE_POLICY)
-    factuality = next(e for e in entries if e["name"] == "FACTUALITY AND ACCURACY")
-    assert "FACTUALITY AND ACCURACY" in factuality["policy_text"]
-    assert "ACTIONABILITY AND PRACTICALITY" not in factuality["policy_text"]
-    assert "SAFETY, SECURITY, AND PRIVACY" not in factuality["policy_text"]
-    assert "TONE, DIGNITY, AND EMPATHY" not in factuality["policy_text"]
-
-
-def test_split_per_criterion_renumbers_each_as_criterion_1():
-    # Original numbers are 1..4; each single-criterion policy text should
-    # renumber its own criterion "1." (nothing else to number relative to),
-    # same rationale as split_tagged_policy's consecutive renumbering.
-    entries = pc.split_per_criterion(SAMPLE_POLICY)
-    tone = next(e for e in entries if e["name"] == "TONE, DIGNITY, AND EMPATHY")
-    assert "1. TONE, DIGNITY, AND EMPATHY" in tone["policy_text"]
-    assert "4. TONE, DIGNITY, AND EMPATHY" not in tone["policy_text"]
-
-
-def test_split_per_criterion_preserves_preamble():
-    entries = pc.split_per_criterion(SAMPLE_POLICY)
-    assert all(e["policy_text"].startswith("POLICY") for e in entries)
-
-
-def test_split_per_criterion_preserves_original_number_and_tag_fields():
-    entries = pc.split_per_criterion(SAMPLE_POLICY)
-    by_name = {e["name"]: e for e in entries}
-    assert by_name["FACTUALITY AND ACCURACY"]["number"] == 2
-    assert by_name["SAFETY, SECURITY, AND PRIVACY"]["number"] == 3
-
-
 def test_real_humanitarian_explicit_tool_selection_file_parses_correctly():
     path = os.path.join(
         os.path.dirname(__file__), "..", "config", "humanitarian_policy_explicit_tool_selection.txt"

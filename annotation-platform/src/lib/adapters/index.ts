@@ -75,16 +75,3 @@ export async function getRecordByIdForDataset(
   if (language) return records.find((r) => r.id === id && r.language === language);
   return records.find((r) => r.id === id);
 }
-
-/** Every language variant of one scenario id (e.g. "IR01" in en + fa), sorted
- * by language for a stable column order. Used by the scenario detail page to
- * show all of a scenario's languages side by side, so an annotator can
- * compare language-related judgment differences without navigating away. */
-export async function getRecordsByIdForDataset(
-  useCase: UseCase,
-  datasetId: DatasetId,
-  id: string
-): Promise<EvaluationRecord[]> {
-  const records = await getRecordsForDataset(useCase, datasetId);
-  return records.filter((r) => r.id === id).sort((a, b) => a.language.localeCompare(b.language));
-}

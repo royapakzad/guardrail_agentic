@@ -24,7 +24,6 @@ Exports:
     has_explicit_tool_tags(policy_text) -> bool
     parse_tagged_criteria(policy_text)  -> list[dict]  (number, name, needs_tools, header, body)
     split_tagged_policy(policy_text)    -> (tool_policy_text, nontool_policy_text)
-    split_per_criterion(policy_text)    -> list[dict]  (number, name, needs_tools, policy_text)
 """
 from __future__ import annotations
 
@@ -126,42 +125,3 @@ def split_tagged_policy(policy_text: str) -> tuple[str, str]:
         return "\n\n".join(parts).strip() + "\n"
 
     return _assemble(tool_bodies), _assemble(nontool_bodies)
-
-
-def split_per_criterion(policy_text: str) -> list[dict]:
-    """
-    Split a policy into one standalone policy text per criterion, each
-    containing only that single criterion (renumbered "1." — a
-    single-criterion policy has nothing else to number relative to).
-
-    Used by the per-criterion parallel judge mode (run_per_criterion_guardrail
-    in agentic_runner.py), which fires one independent LLM call per criterion
-    instead of the two-way tool/non-tool group split in split_tagged_policy().
-
-    Returns a list of dicts, one per criterion in original order:
-        {"number": int, "name": str, "needs_tools": bool, "policy_text": str}
-    "number" and "needs_tools" are the criterion's original values (from
-    parse_tagged_criteria) — only the criterion's *own* header, embedded in
-    "policy_text", is renumbered.
-    """
-    criteria = parse_tagged_criteria(policy_text)
-    first_header_pos = _HEADER_RE.search(policy_text).start()
-    preamble = policy_text[:first_header_pos].rstrip()
-
-    out: list[dict] = []
-    for c in criteria:
-        original_header = f"{c['number']}. {c['name']}"
-        renumbered_header = f"1. {c['name']}"
-        body = c["body"].replace(original_header, renumbered_header, 1)
-        parts = [preamble] if preamble else []
-        parts.append(body)
-        single_policy_text = "\n\n".join(parts).strip() + "\n"
-        out.append(
-            {
-                "number": c["number"],
-                "name": c["name"],
-                "needs_tools": c["needs_tools"],
-                "policy_text": single_policy_text,
-            }
-        )
-    return out
