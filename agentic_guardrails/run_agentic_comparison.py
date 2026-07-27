@@ -69,7 +69,7 @@ from guardrails_runner import (
     load_text_file,
     build_guardrail_input_text,
 )
-from agentic_runner import run_split_criteria_guardrail, AgenticJudgment
+from agentic_runner import run_split_criteria_guardrail, run_per_criterion_guardrail, AgenticJudgment
 from comparison import compare_judgments
 from output_writer import write_outputs
 from scenario_logger import ScenarioLogger
@@ -293,6 +293,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print tool calls and search results in real time.",
     )
+    p.add_argument(
+        "--judge-granularity",
+        default="split",
+        choices=["split", "per-criterion"],
+        help=(
+            "How criteria are batched into judge LLM calls (default: split). "
+            "split: 2 calls total (agentic_runner.run_split_criteria_guardrail) "
+            "-- one non-agentic call over the full policy, one agentic call over "
+            "the tool-tagged subset. per-criterion: N+M calls, all concurrent "
+            "(agentic_runner.run_per_criterion_guardrail) -- one non-agentic call "
+            "per criterion (N), plus one additional agentic call per tool-tagged "
+            "criterion (M). Experimental -- see issue #74 for the tradeoffs."
+        ),
+    )
 
     return p
 
@@ -310,6 +324,7 @@ def process_row(
     max_tool_calls: int,
     web_search_tool: str = "duckduckgo",
     tool_group: str = "default",  # PR #15
+    judge_granularity: str = "split",
     verbose: bool = False,
     log_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -377,6 +392,7 @@ def process_row(
             "max_tool_calls_allowed": max_tool_calls,
             "web_search_tool": web_search_tool,
             "tool_group": tool_group,  # PR #15
+            "judge_granularity": judge_granularity,
         }
     )
 
@@ -417,10 +433,13 @@ def process_row(
             na_error: Optional[Exception] = None
             aj: Optional[AgenticJudgment] = None
 
+            _split_fn = (
+                run_per_criterion_guardrail if judge_granularity == "per-criterion" else run_split_criteria_guardrail
+            )
             if verbose:
-                print(f"        split-criteria eval ...", end=" ", flush=True)
+                print(f"        {judge_granularity} eval ...", end=" ", flush=True)
             try:
-                gr, aj = run_split_criteria_guardrail(
+                gr, aj = _split_fn(
                     guardrail=guardrail,
                     provider=judge.provider,
                     guardrail_model=judge.model,
@@ -759,6 +778,7 @@ def main() -> None:
                 max_tool_calls=args.max_tool_calls,
                 web_search_tool=args.web_search_tool,
                 tool_group=args.tool_group,  # PR #15
+                judge_granularity=args.judge_granularity,
                 verbose=args.verbose,
                 log_dir=log_dir,
             )
