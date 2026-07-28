@@ -70,13 +70,19 @@ def _completion_with_retry(**kwargs):
     strips an unsupported `temperature` kwarg for models that reject any
     explicit value (e.g. OpenAI's reasoning-tier models only accept their
     default temperature and error on other values) — Issue #50.
+
+    The temperature-strip retry fires whenever temperature was set, not only
+    when the error message happens to mention "temperature": routing through
+    a gateway (e.g. Otari) can genericize the underlying provider error into
+    something that no longer contains the word at all, which previously made
+    this check silently never fire.
     """
     for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
         try:
             return _completion(**kwargs)
         except Exception as exc:
             msg = str(exc).lower()
-            if "temperature" in kwargs and "temperature" in msg:
+            if "temperature" in kwargs:
                 kwargs = {k: v for k, v in kwargs.items() if k != "temperature"}
                 continue
             if attempt == _RATE_LIMIT_MAX_RETRIES:
