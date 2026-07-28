@@ -18,7 +18,8 @@ export function CodebookForm({ useCase }: Props) {
     setStatus("submitting");
     setErrorMessage(null);
 
-    const form = new FormData(e.currentTarget);
+    const formEl = e.currentTarget;
+    const form = new FormData(formEl);
     const body = {
       useCase,
       name: form.get("name"),
@@ -39,7 +40,7 @@ export function CodebookForm({ useCase }: Props) {
         throw new Error(data.error ?? `Request failed (${res.status})`);
       }
       setStatus("done");
-      e.currentTarget.reset();
+      formEl.reset();
       router.refresh();
     } catch (err) {
       setStatus("error");
