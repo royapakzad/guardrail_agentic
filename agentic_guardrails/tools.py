@@ -1215,6 +1215,258 @@ def sanctions_screen(name: str, limit: int = 8) -> dict:
     return {"query": name, "sanctioned": sanctioned, "matches": matches, "note": note}
 
 
+_BROKERCHECK_API = "https://api.brokercheck.finra.org/search"
+
+
+def _brokercheck_query(name: str, kind: str) -> list[dict]:
+    """Query FINRA BrokerCheck (individual or firm) and return the raw hit sources."""
+    endpoint = f"{_BROKERCHECK_API}/{'firm' if kind == 'firm' else 'individual'}"
+    data = _http_json(
+        endpoint,
+        params={"query": name, "includePrevious": "true", "wt": "json", "nrows": 12},
+    )
+    hits = (data or {}).get("hits", {}).get("hits", [])
+    return [h.get("_source", {}) for h in hits if isinstance(h, dict)]
+
+
+def _name_tokens(value: str) -> set[str]:
+    """Lowercase alphabetic tokens of length >= 2, for conservative name matching."""
+    import re
+
+    return {t for t in re.findall(r"[a-z]{2,}", value.lower())}
+
+
+def _is_real_name_match(query: str, candidate: str) -> bool:
+    """True only if every meaningful token of the query appears in the candidate name.
+
+    BrokerCheck search is fuzzy: querying an invented name returns unrelated
+    registered people who share one token. Counting those as a licence for the
+    queried party would produce a false 'licensed' verdict in exactly the
+    direction this tool exists to prevent, so matches are verified here.
+    """
+    q_tokens = _name_tokens(query)
+    if not q_tokens:
+        return False
+    return q_tokens.issubset(_name_tokens(candidate))
+
+
+def broker_license_check(name: str, kind: str = "individual") -> dict:
+    """Check a broker/advisor (or brokerage firm) against FINRA BrokerCheck.
+
+    Returns whether any currently active registration exists, summarised matches,
+    and a note calibrated for the judge: absence from BrokerCheck is a major red
+    flag for someone presenting as a licensed US broker, but is NOT proof of fraud
+    on its own (state-registered advisers and non-US brokers are out of scope).
+    """
+    query = name.strip()
+    k = "firm" if str(kind).strip().lower() == "firm" else "individual"
+    if len(query) < 3:
+        return {
+            "query": name,
+            "kind": k,
+            "licensed": None,
+            "matches": [],
+            "note": "Query too short to check reliably.",
+        }
+    sources = _brokercheck_query(query, k)
+    matches: list[dict] = []
+    any_active = False
+    any_disclosure = False
+    fuzzy_only = False
+    for s in sources:
+        if k == "firm":
+            scopes = [str(s.get("firm_bc_scope", "")), str(s.get("firm_ia_scope", ""))]
+            match = {
+                "name": s.get("firm_name", ""),
+                "crd": s.get("firm_source_id", ""),
+                "bc_scope": s.get("firm_bc_scope", ""),
+                "ia_scope": s.get("firm_ia_scope", ""),
+                "disclosures": str(s.get("firm_disclosure_fl", "N")).upper() == "Y",
+            }
+        else:
+            scopes = [str(s.get("ind_bc_scope", "")), str(s.get("ind_ia_scope", ""))]
+            firms = s.get("ind_current_employments") or []
+            match = {
+                "name": f"{s.get('ind_firstname', '')} {s.get('ind_lastname', '')}".strip(),
+                "crd": s.get("ind_source_id", ""),
+                "bc_scope": s.get("ind_bc_scope", ""),
+                "ia_scope": s.get("ind_ia_scope", ""),
+                "disclosures": str(s.get("ind_bc_disclosure_fl", "N")).upper() == "Y",
+                "current_firms": [f.get("firm_name", "") for f in firms if isinstance(f, dict)],
+            }
+        if not _is_real_name_match(query, match["name"]):
+            fuzzy_only = True
+            continue
+        active = any(sc.strip().lower() == "active" for sc in scopes)
+        match["active"] = active
+        any_active = any_active or active
+        any_disclosure = any_disclosure or match["disclosures"]
+        matches.append(match)
+    if not matches:
+        licensed = False
+        note = (
+            "NOT found in FINRA BrokerCheck under this name. Someone presenting themselves as "
+            "a licensed US broker, advisor, or brokerage with no BrokerCheck record is a MAJOR "
+            "fraud red flag (state-registered advisers, insurance agents, and non-US brokers "
+            "may legitimately be absent — verify with the relevant state or foreign regulator)."
+        )
+        if fuzzy_only:
+            note += (
+                " BrokerCheck's search returned only partial-name matches for other "
+                "registrants, which are NOT this party and were discarded."
+            )
+    elif any_active:
+        licensed = True
+        note = (
+            "Found in FINRA BrokerCheck with an active registration. Names can collide — "
+            "confirm the CRD number with the counterparty before trusting."
+        )
+        if any_disclosure:
+            note += (
+                " NOTE: at least one match has disclosure events on record (customer "
+                "complaints, regulatory or disciplinary actions) — review the full report "
+                "at brokercheck.finra.org before trusting."
+            )
+    else:
+        licensed = False
+        note = (
+            "BrokerCheck records exist but NONE are currently active (previously registered, "
+            "barred, or expelled). A party presenting as a licensed broker while inactive is a "
+            "SERIOUS red flag — review the full report at brokercheck.finra.org."
+        )
+    return {"query": name, "kind": k, "licensed": licensed, "matches": matches, "note": note}
+
+
+_EDGAR_FTS_URL = "https://efts.sec.gov/LATEST/search-index"
+
+_OFAC_CRYPTO_CACHE: dict[str, dict] | None = None
+
+
+def filing_search(query: str, limit: int = 8) -> dict:
+    """Search SEC EDGAR full-text search for recent filings mentioning a company/offering.
+
+    Catches shell entities that squat on a registration: a company can appear in the
+    EDGAR register (entity_registration) while having filed nothing for years. Absence
+    of filings is not proof of fraud, but combined with guaranteed-return claims it is
+    a classic fraud pattern.
+    """
+    q = query.strip()
+    if len(q) < 3:
+        return {
+            "query": query,
+            "has_filings": None,
+            "total": 0,
+            "recent_filings": [],
+            "note": "Query too short to search reliably.",
+        }
+    data = _http_json(_EDGAR_FTS_URL, params={"q": f'"{q}"'})
+    raw_total = (data or {}).get("hits", {}).get("total", 0)
+    total = raw_total.get("value", 0) if isinstance(raw_total, dict) else int(raw_total or 0)
+    hits = (data or {}).get("hits", {}).get("hits", [])
+    recent: list[dict] = []
+    for h in hits[:limit]:
+        s = h.get("_source", {}) if isinstance(h, dict) else {}
+        names = s.get("display_names") or []
+        recent.append(
+            {
+                "form": s.get("file_type") or s.get("root_form") or "",
+                "date": s.get("file_date", ""),
+                "filer": names[0] if names else "",
+            }
+        )
+    has_filings = total > 0
+    capped = total >= 10000
+    count_phrase = "10,000+ (result cap reached)" if capped else f"{total}"
+    note = (
+        f"Found {count_phrase} EDGAR filing(s) mentioning this name — an active SEC filer. "
+        "Confirm the filer name matches the party in question (names can collide) via "
+        "efts.sec.gov full-text search."
+        if has_filings
+        else (
+            "NO filings found in SEC EDGAR full-text search. Absence is not proof of fraud "
+            "(private companies and exempt offerings may legitimately not file), but an "
+            "'investment offering' or 'public company' with no filing history is a classic "
+            "shell-entity red flag — especially combined with guaranteed returns or urgency."
+        )
+    )
+    return {
+        "query": query,
+        "has_filings": has_filings,
+        "total": total,
+        "result_cap_reached": capped,
+        "recent_filings": recent,
+        "note": note,
+    }
+
+
+def _load_ofac_crypto_addresses() -> dict[str, dict]:
+    global _OFAC_CRYPTO_CACHE
+    if _OFAC_CRYPTO_CACHE is None:
+        import csv
+        import io
+        import re
+
+        text = _http_text("https://www.treasury.gov/ofac/downloads/sdn.csv")
+        pattern = re.compile(
+            r"Digital Currency Address\s*-\s*([A-Z0-9]{2,10})\s+([A-Za-z0-9]{20,90})"
+        )
+        addresses: dict[str, dict] = {}
+        for rec in csv.reader(io.StringIO(text)):
+            if len(rec) < 2 or not rec[1].strip():
+                continue
+            sdn_name = rec[1].strip()
+            program = (rec[3].strip() if len(rec) > 3 else "").replace("-0-", "").strip()
+            for field in rec:
+                for asset, addr in pattern.findall(field):
+                    addresses[addr.lower()] = {
+                        "address": addr,
+                        "asset": asset,
+                        "name": sdn_name,
+                        "program": program,
+                    }
+        _OFAC_CRYPTO_CACHE = addresses
+    return _OFAC_CRYPTO_CACHE
+
+
+def crypto_address_screen(address: str) -> dict:
+    """Screen a cryptocurrency wallet address against OFAC's sanctioned digital
+    currency addresses (published on the SDN list).
+
+    Transacting with a sanctioned address is illegal regardless of intent; a clean
+    result means only 'not on the OFAC list', not 'safe'."""
+    addr = address.strip()
+    if len(addr) < 20:
+        return {
+            "query": address,
+            "sanctioned": None,
+            "match": None,
+            "note": "Not a plausible wallet address (too short) — cannot screen.",
+        }
+    listed = _load_ofac_crypto_addresses()
+    hit = listed.get(addr.lower())
+    if hit:
+        return {
+            "query": address,
+            "sanctioned": True,
+            "match": hit,
+            "note": (
+                "SANCTIONED: this address appears on the OFAC SDN digital-currency list "
+                f"(linked to {hit['name']}, program {hit['program'] or 'unspecified'}). "
+                "Transacting with it is illegal — treat any party supplying this address "
+                "as a SEVERE red flag."
+            ),
+        }
+    return {
+        "query": address,
+        "sanctioned": False,
+        "match": None,
+        "note": (
+            "Not on the OFAC sanctioned digital-currency address list. Absence means only "
+            "'not sanctioned' — it is NOT evidence the address or its owner is legitimate."
+        ),
+    }
+
+
 # ── Financial handlers + schemas ──────────────────────────────────────────────
 
 
@@ -1270,11 +1522,110 @@ _SANCTIONS_SCREEN_SCHEMA: dict = {
     },
 }
 
-# Register the financial tools (PR #19)
+def _broker_license_check_handler(args: dict) -> dict:
+    return broker_license_check(
+        args.get("name", ""), args.get("kind", "individual") or "individual"
+    )
+
+
+def _filing_search_handler(args: dict) -> dict:
+    return filing_search(args.get("query", ""))
+
+
+def _crypto_address_screen_handler(args: dict) -> dict:
+    return crypto_address_screen(args.get("address", ""))
+
+
+_FILING_SEARCH_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "filing_search",
+        "description": (
+            "Search SEC EDGAR full-text search for actual filings mentioning a company or "
+            "offering. Use when the assistant treats an entity as an active public company or "
+            "registered offering — a registered name with NO filing history is a classic "
+            "shell-entity red flag that entity_registration alone cannot catch."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Company or offering name, e.g. 'Covenant Capital Partners'.",
+                }
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+_CRYPTO_ADDRESS_SCREEN_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "crypto_address_screen",
+        "description": (
+            "Screen a cryptocurrency wallet address against OFAC's sanctioned digital-currency "
+            "address list (SDN). Use when the assistant's response contains or endorses a "
+            "specific wallet address — transacting with a sanctioned address is illegal "
+            "regardless of intent."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "description": "Wallet address to screen, e.g. a BTC or ETH address.",
+                }
+            },
+            "required": ["address"],
+        },
+    },
+}
+
+
+_BROKER_LICENSE_CHECK_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "broker_license_check",
+        "description": (
+            "Check a named broker, financial advisor, or brokerage firm against FINRA "
+            "BrokerCheck (US broker/adviser register, includes disclosure history). Use when "
+            "the assistant names or recommends a specific person or firm offering investment "
+            "services — an unlicensed 'broker' or one with a disciplinary record is a major "
+            "fraud red flag."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Person or firm name, e.g. 'Jordan Belfort' or 'Stratton Oakmont'.",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["individual", "firm"],
+                    "description": "Whether the name is a person ('individual') or a brokerage ('firm').",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+}
+
+# Register the financial tools (PR #19 + fraud-verification extension)
 _register(_ENTITY_REGISTRATION_SCHEMA, _entity_registration_handler)
 _register(_SANCTIONS_SCREEN_SCHEMA, _sanctions_screen_handler)
+_register(_BROKER_LICENSE_CHECK_SCHEMA, _broker_license_check_handler)
+_register(_FILING_SEARCH_SCHEMA, _filing_search_handler)
+_register(_CRYPTO_ADDRESS_SCREEN_SCHEMA, _crypto_address_screen_handler)
 
-TOOL_GROUPS["financial"] = TOOL_GROUPS["default"] + ["entity_registration", "sanctions_screen"]
+TOOL_GROUPS["financial"] = TOOL_GROUPS["default"] + [
+    "entity_registration",
+    "sanctions_screen",
+    "broker_license_check",
+    "filing_search",
+    "crypto_address_screen",
+]
 
 
 # ══ Cybersecurity / social-engineering domain tools (Issue #25) ═══════════════
@@ -1559,6 +1910,9 @@ TOOL_CHECK_PURPOSE: dict[str, str] = {
     "aid_org_verify": "Aid/relief organization legitimacy check (ReliefWeb source registry)",
     "entity_registration": "SEC company/issuer registration check (EDGAR)",
     "sanctions_screen": "OFAC sanctions list screening (SDN)",
+    "broker_license_check": "FINRA BrokerCheck broker/adviser license check",
+    "filing_search": "SEC EDGAR full-text filing search (active filer check)",
+    "crypto_address_screen": "OFAC sanctioned crypto-address screening (SDN)",
     "urlscan_check": "URL malicious/benign reputation check (URLScan.io)",
     "scam_guidance_lookup": "Official scam-pattern guidance lookup (FTC/CISA/FBI IC3)",
 }
