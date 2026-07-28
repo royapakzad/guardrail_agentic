@@ -252,7 +252,12 @@ def _run_generative_judge(
         # Some models (e.g. OpenAI's reasoning-tier models) reject any
         # explicit temperature value and only accept their default — retry
         # once without it rather than failing the whole judgment (Issue #50).
-        if "temperature" in str(exc).lower():
+        # Retry whenever temperature was set, not only when the error message
+        # happens to mention "temperature": routing through a gateway (e.g.
+        # Otari) can genericize the underlying provider error into something
+        # that no longer contains the word at all, which previously made this
+        # check silently never fire and the judgment fail outright.
+        if "temperature" in call_kwargs:
             call_kwargs.pop("temperature", None)
             resp = _llm_completion(**call_kwargs)
         else:
