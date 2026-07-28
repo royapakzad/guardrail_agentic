@@ -98,7 +98,8 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
     setStatus("submitting");
     setErrorMessage(null);
 
-    const form = new FormData(e.currentTarget);
+    const formEl = e.currentTarget;
+    const form = new FormData(formEl);
     const annotatorName = String(form.get("annotatorName") ?? "").trim();
     const judgmentAlignmentEnRaw = form.get("judgmentAlignmentEn");
     const judgmentAlignmentNonEnRaw = form.get("judgmentAlignmentNonEn");
@@ -168,7 +169,7 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
 
       setStatus("done");
       setRows([emptyRow()]);
-      e.currentTarget.reset();
+      formEl.reset();
       router.refresh();
     } catch (err) {
       setStatus("error");
