@@ -48,20 +48,14 @@ export const JUDGMENT_ALIGNMENT_LABELS: Record<JudgmentAlignment, string> = {
 // keeps the schema simple for v1; a fast-follow could add a target_criterion
 // column if that turns out to matter for analysis.
 export const CODING_TARGET_FIELDS = [
-  "assistant_response",
   "nonagentic_explanation",
   "agentic_explanation",
-  "criterion_human_review_needed",
-  "criterion_suggested_improvement",
   "other",
 ] as const;
 
 export const CODING_TARGET_FIELD_LABELS: Record<(typeof CODING_TARGET_FIELDS)[number], string> = {
-  assistant_response: "Assistant response",
   nonagentic_explanation: "Non-agentic judge explanation",
   agentic_explanation: "Agentic judge explanation",
-  criterion_human_review_needed: "A criterion's human_review_needed text (name the criterion in your quote/note)",
-  criterion_suggested_improvement: "A criterion's suggested_improvement text (name the criterion in your quote/note)",
   other: "Other (specify in note)",
 };
 
