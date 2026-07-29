@@ -43,6 +43,7 @@ from any_llm import completion as _completion
 from llm_gateway import resolve_completion_kwargs, JUDGE_TEMPERATURE  # PR #14; Issue #50
 from tools import (
     get_tool_schemas,
+    get_specialized_tool_names,
     dispatch_tool_call,
     check_url_validity,
     check_acronym,
@@ -58,6 +59,13 @@ if TYPE_CHECKING:
 
 
 MAX_TOOL_CALLS = 5
+# Reserve the last N calls of the budget exclusively for domain-specific
+# tools (see run_agentic_guardrail's specialized_tool_reserve) -- generic
+# tools (search_web, fetch_url, check_url_validity) tend to front-load the
+# budget in URL/acronym-heavy responses, otherwise leaving no room for
+# specialized tools to ever be called. No-op for the "default" tool group,
+# which has no specialized tools to reserve for.
+DEFAULT_SPECIALIZED_TOOL_RESERVE = 2
 VALID_SCORE_THRESHOLD = 0.6  # score > threshold → valid=True
 
 _RATE_LIMIT_MAX_RETRIES = 3
@@ -638,7 +646,8 @@ def build_agentic_user_message(
     )
     if "3" not in phases_done:
         remaining.append(
-            "Phase 3: call check_acronym for every acronym+expansion pair found in the response."
+            "Phase 3: call check_acronym for every acronym+expansion pair found in the "
+            "response, if check_acronym is available to you in the tool list above."
         )
 
     parts.append(
@@ -885,6 +894,7 @@ def run_agentic_guardrail(
     assistant_response: str,
     max_tool_calls: int = MAX_TOOL_CALLS,
     tool_group: str = "default",  # PR #15: selectable tool group
+    specialized_tool_reserve: int = DEFAULT_SPECIALIZED_TOOL_RESERVE,
     verbose: bool = False,
     logger: "Optional[ScenarioLogger]" = None,
     policy_label: str = "",
@@ -904,6 +914,19 @@ def run_agentic_guardrail(
 
     scenario_language: BCP-47 language tag of the scenario (e.g. "en", "fr", "fa").
         Used by the acronym pre-run to build language-aware search queries.
+
+    specialized_tool_reserve: once `calls_remaining <= specialized_tool_reserve`,
+        the `tools` list offered to the model for the rest of this evaluation is
+        narrowed to just tool_group's domain-specific tools (get_tool_schemas'
+        `only` param) — generic tools (search_web, fetch_url,
+        check_url_validity) become unavailable, so any remaining budget can
+        only be spent on the tools this domain actually added. tool_choice
+        stays "auto" throughout: if none of the specialized tools apply to
+        what's left to verify, the model can still proceed straight to its
+        final judgment rather than being forced into a spurious call. No-op
+        for tool groups with no specialized tools (e.g. "default" itself).
+        Clamped so it never eats the very first call, which Phase 1 needs for
+        check_url_validity.
     """
     tool_calls_made = 0
     sources_used: list[str] = []
@@ -973,15 +996,48 @@ def run_agentic_guardrail(
             max_tool_calls=max_tool_calls,
         )
 
+    specialized_tool_names = get_specialized_tool_names(tool_group)
+    # Never let the reserve swallow the very first call — Phase 1 needs at
+    # least one generic-tool turn available for check_url_validity.
+    effective_reserve = min(specialized_tool_reserve, max(0, max_tool_calls - 1))
+
     _conclusion_injected = False
+    _reserve_injected = False
     while True:
-        tool_choice = "none" if tool_calls_made >= max_tool_calls else "auto"
+        calls_remaining = max_tool_calls - tool_calls_made
+        tool_choice = "none" if calls_remaining <= 0 else "auto"
 
         if tool_choice == "none" and not _conclusion_injected:
             messages.append(dict(_CONCLUDE_MESSAGE))
             _conclusion_injected = True
             if verbose:
                 print("      [cap reached — injecting conclusion prompt]")
+
+        in_reserved_window = (
+            tool_choice != "none"
+            and bool(specialized_tool_names)
+            and effective_reserve > 0
+            and calls_remaining <= effective_reserve
+        )
+
+        if in_reserved_window and not _reserve_injected:
+            messages.append({
+                "role": "user",
+                "content": (
+                    f"You have {calls_remaining} tool call(s) left. For the rest of this "
+                    "evaluation they are reserved for this domain's specialized tools: "
+                    f"{', '.join(specialized_tool_names)}. Generic tools (search_web, "
+                    "fetch_url, check_url_validity, check_acronym) are no longer available. "
+                    "If none of the specialized tools apply to what's left to verify, "
+                    "proceed directly to your final JSON judgment."
+                ),
+            })
+            _reserve_injected = True
+            if verbose:
+                print(
+                    f"      [reserved window] last {calls_remaining} call(s) restricted to: "
+                    f"{specialized_tool_names}"
+                )
 
         # PR #14: resolve gateway overrides (empty dict in direct mode)
         gateway_overrides = resolve_completion_kwargs(provider, guardrail_model)
@@ -993,7 +1049,9 @@ def run_agentic_guardrail(
         call_kwargs.update(gateway_overrides)
         call_kwargs["temperature"] = JUDGE_TEMPERATURE  # Issue #50
         if tool_choice != "none":
-            call_kwargs["tools"] = get_tool_schemas(tool_group)  # PR #15
+            call_kwargs["tools"] = get_tool_schemas(  # PR #15
+                tool_group, only=specialized_tool_names if in_reserved_window else None
+            )
             call_kwargs["tool_choice"] = tool_choice
             # Force one tool call per turn for both OpenAI and Anthropic.
             # parallel_tool_calls still keys off the original provider (pre-gateway).
@@ -1366,6 +1424,7 @@ def run_split_criteria_guardrail(
     assistant_response: str,
     max_tool_calls: int = MAX_TOOL_CALLS,
     tool_group: str = "default",
+    specialized_tool_reserve: int = DEFAULT_SPECIALIZED_TOOL_RESERVE,
     verbose: bool = False,
     logger: "Optional[ScenarioLogger]" = None,
     policy_label: str = "",
@@ -1415,6 +1474,7 @@ def run_split_criteria_guardrail(
             assistant_response=assistant_response,
             max_tool_calls=max_tool_calls,
             tool_group=tool_group,
+            specialized_tool_reserve=specialized_tool_reserve,
             verbose=verbose,
             logger=logger,
             policy_label=policy_label,
