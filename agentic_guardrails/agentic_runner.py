@@ -50,12 +50,7 @@ from tools import (
     set_domain_hint_for_group,
     TOOL_CHECK_PURPOSE,
 )  # PR #15
-from guardrails_runner import (
-    SHARED_SEVERITY_ANCHORS,
-    NonAgenticJudgment,
-    run_guardrail_for_policy,
-    _derive_criteria_verdicts_from_explanation,
-)
+from guardrails_runner import SHARED_SEVERITY_ANCHORS, NonAgenticJudgment, run_guardrail_for_policy
 from policy_criteria import split_tagged_policy
 
 if TYPE_CHECKING:
@@ -761,8 +756,6 @@ def parse_judgment_from_text(text: str) -> dict:
             criteria_verdicts: list[dict] = data.get("criteria_verdicts") or []
             if not isinstance(criteria_verdicts, list):
                 criteria_verdicts = []
-            if not criteria_verdicts:
-                criteria_verdicts = _derive_criteria_verdicts_from_explanation(explanation)
 
             # Derived in code from each criterion's own suggested_improvement rather
             # than asking the model to also restate a redundant top-level field

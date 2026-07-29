@@ -196,39 +196,6 @@ def _extract_first_json_object(text: str) -> Optional[dict]:
     return None
 
 
-# Some judge models (observed with openai:gpt-4o and gpt-4o-mini) reliably
-# write the required per-criterion "N. CRITERION: ... -> Verdict: ..." prose
-# into `explanation` but skip populating the parallel `criteria_verdicts` JSON
-# array, even when explicitly instructed to include it — every other field
-# (score, explanation) comes back correctly, only the structured array is
-# dropped. Reconstructing it here from the prose keeps the annotation
-# platform populated for those models instead of showing "no criteria
-# returned" any time this happens. human_review_needed/suggested_improvement
-# can't be recovered this way (they're never restated in the prose), so those
-# come back empty for any criterion recovered through this path.
-_CRITERION_LINE_RE = re.compile(
-    r"(?m)^\s*\d+\.\s*([^:\n]+):\s*.*?"
-    r"(?:→|->)\s*Verdict:\s*(not fully compliant|compliant)",
-    re.IGNORECASE | re.DOTALL,
-)
-
-
-def _derive_criteria_verdicts_from_explanation(explanation: str) -> list:
-    """Best-effort reconstruction of criteria_verdicts from the explanation prose."""
-    if not explanation:
-        return []
-    derived = []
-    for m in _CRITERION_LINE_RE.finditer(explanation):
-        verdict = "NOT_FULLY_COMPLIANT" if m.group(2).lower().startswith("not") else "COMPLIANT"
-        derived.append(
-            {
-                "criterion": m.group(1).strip(),
-                "verdict": verdict,
-                "human_review_needed": "",
-                "suggested_improvement": "",
-            }
-        )
-    return derived
 
 
 # ── Generative judge (PR #13: renamed from _run_nonagentic_fallback) ──────────
@@ -315,8 +282,6 @@ def _run_generative_judge(
         criteria_verdicts: list = data.get("criteria_verdicts") or []
         if not isinstance(criteria_verdicts, list):
             criteria_verdicts = []
-        if not criteria_verdicts:
-            criteria_verdicts = _derive_criteria_verdicts_from_explanation(explanation)
         # Derived in code from each criterion's own suggested_improvement rather
         # than asking the model to also restate a redundant top-level field
         # (Issue #54 follow-up: simplify the per-criterion schema).
