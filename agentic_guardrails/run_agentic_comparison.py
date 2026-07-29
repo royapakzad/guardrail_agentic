@@ -69,7 +69,11 @@ from guardrails_runner import (
     load_text_file,
     build_guardrail_input_text,
 )
-from agentic_runner import run_split_criteria_guardrail, AgenticJudgment
+from agentic_runner import (
+    run_split_criteria_guardrail,
+    AgenticJudgment,
+    DEFAULT_SPECIALIZED_TOOL_RESERVE,
+)
 from comparison import compare_judgments
 from output_writer import write_outputs
 from scenario_logger import ScenarioLogger
@@ -289,6 +293,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--specialized-tool-reserve",
+        type=int,
+        default=DEFAULT_SPECIALIZED_TOOL_RESERVE,
+        help=(
+            f"Reserve the last N tool calls of the budget for this tool group's "
+            f"domain-specific tools only, once generic tools would otherwise consume "
+            f"the whole budget (default: {DEFAULT_SPECIALIZED_TOOL_RESERVE}). No-op for "
+            "--tool-group default. Set to 0 to disable."
+        ),
+    )
+    p.add_argument(
         "--verbose",
         action="store_true",
         help="Print tool calls and search results in real time.",
@@ -310,6 +325,7 @@ def process_row(
     max_tool_calls: int,
     web_search_tool: str = "duckduckgo",
     tool_group: str = "default",  # PR #15
+    specialized_tool_reserve: int = DEFAULT_SPECIALIZED_TOOL_RESERVE,
     verbose: bool = False,
     log_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -377,6 +393,7 @@ def process_row(
             "max_tool_calls_allowed": max_tool_calls,
             "web_search_tool": web_search_tool,
             "tool_group": tool_group,  # PR #15
+            "specialized_tool_reserve": specialized_tool_reserve,
         }
     )
 
@@ -432,6 +449,7 @@ def process_row(
                     assistant_response=assistant_response,
                     max_tool_calls=max_tool_calls,
                     tool_group=tool_group,  # PR #15
+                    specialized_tool_reserve=specialized_tool_reserve,
                     verbose=verbose,
                     logger=logger,
                     policy_label=f"{policy_label}[{judge.model_id}]",
@@ -614,6 +632,7 @@ def main() -> None:
             f"Unknown --tool-group {args.tool_group!r}. Valid groups: {valid_groups}"
         )
     print(f"Tool group: {args.tool_group}")
+    print(f"Specialized tool reserve: {args.specialized_tool_reserve}")
 
     # ---- Load shared text configs -------------------------------------------
     # These files are read once and passed to every row's evaluation.
@@ -759,6 +778,7 @@ def main() -> None:
                 max_tool_calls=args.max_tool_calls,
                 web_search_tool=args.web_search_tool,
                 tool_group=args.tool_group,  # PR #15
+                specialized_tool_reserve=args.specialized_tool_reserve,
                 verbose=args.verbose,
                 log_dir=log_dir,
             )

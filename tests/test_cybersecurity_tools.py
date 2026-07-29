@@ -6,11 +6,13 @@ from tools import get_tool_schemas
 
 def test_cybersecurity_group_registered():
     names = [s["function"]["name"] for s in get_tool_schemas("cybersecurity")]
+    # check_acronym is intentionally excluded from the live default tool set
+    # (see tools.TOOL_GROUPS) -- pre-run acronym checks cover it at zero
+    # tool-call-budget cost instead.
     assert names == [
         "search_web",
         "fetch_url",
         "check_url_validity",
-        "check_acronym",
         "urlscan_check",
         "scam_guidance_lookup",
     ]

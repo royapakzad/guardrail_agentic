@@ -644,8 +644,21 @@ class Tool:
 
 REGISTRY: dict[str, Tool] = {}
 
+# check_acronym is intentionally left out of the live default tool list.
+# agentic_runner._prerun_acronym_checks_parallel already verifies every
+# regex-extractable acronym+expansion pair before the tool loop starts, at
+# zero tool-call-budget cost -- but leaving check_acronym in the live list on
+# top of that let the judge spend its (small, 5-8 call) budget on acronyms it
+# noticed itself, crowding out the domain-specific tools (see
+# analysis_improvemnets/live_scenario_qualitative_quantitative_analysis.md and
+# financial-run logs: 0/93 specialized tool calls, 60% budget-exhausted on
+# generic tools alone). The tool itself stays fully registered below (see
+# _register(_CHECK_ACRONYM_SCHEMA, ...)), so it's one line to re-add to
+# "default" below -- worth doing if max_tool_calls is ever raised enough
+# (e.g. ~50) that budget contention with specialized tools stops being a real
+# constraint.
 TOOL_GROUPS: dict[str, list[str]] = {
-    "default": ["search_web", "fetch_url", "check_url_validity", "check_acronym"],
+    "default": ["search_web", "fetch_url", "check_url_validity"],
 }
 
 
@@ -654,10 +667,27 @@ def _register(schema: dict, handler: Callable[[dict], Any]) -> None:
     REGISTRY[name] = Tool(schema=schema, handler=handler)
 
 
-def get_tool_schemas(group: str = "default") -> list[dict]:
-    """Return the OpenAI-format tool schemas for the named group."""
+def get_tool_schemas(group: str = "default", only: list[str] | None = None) -> list[dict]:
+    """Return the OpenAI-format tool schemas for the named group.
+
+    `only`, if given, narrows the result to just those names (still filtered
+    through the group's own membership) -- used to offer just the
+    domain-specific subset of a group for a reserved window of turns near the
+    end of the tool-call budget (see run_agentic_guardrail's
+    specialized_tool_reserve)."""
     names = TOOL_GROUPS.get(group, [])
+    if only is not None:
+        allowed = set(only)
+        names = [n for n in names if n in allowed]
     return [REGISTRY[n].schema for n in names if n in REGISTRY]
+
+
+def get_specialized_tool_names(group: str) -> list[str]:
+    """Tool names in `group` beyond the shared "default" set -- i.e. the
+    domain-specific tools (sanctions_screen, urlscan_check, ...). Empty for
+    the "default" group itself or any group with no domain-specific tools."""
+    default_names = set(TOOL_GROUPS.get("default", []))
+    return [n for n in TOOL_GROUPS.get(group, []) if n not in default_names]
 
 
 # ── Handler wrappers (bridge between dict args and typed functions) ───────────

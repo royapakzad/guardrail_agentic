@@ -6,11 +6,13 @@ from tools import get_tool_schemas
 
 def test_humanitarian_group_registered():
     names = [s["function"]["name"] for s in get_tool_schemas("humanitarian")]
+    # check_acronym is intentionally excluded from the live default tool set
+    # (see tools.TOOL_GROUPS) -- pre-run acronym checks cover it at zero
+    # tool-call-budget cost instead.
     assert names == [
         "search_web",
         "fetch_url",
         "check_url_validity",
-        "check_acronym",
         "reliefweb_situation",
         "disaster_alert",
         "health_advisory",
