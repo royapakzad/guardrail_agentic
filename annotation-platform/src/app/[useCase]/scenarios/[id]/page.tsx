@@ -8,6 +8,7 @@ import { UseCaseNav } from "@/lib/ui/UseCaseNav";
 import { listAnnotations, listCodebookCodes, listCodeApplications } from "@/lib/db/queries";
 import type { Annotation, CodeApplicationWithCode } from "@/lib/db/queries";
 import { computeScenarioToolSummary } from "@/lib/metrics";
+import { isToolTaggedCriterion, normalizeCriterionName as toCanonicalCriterionName } from "@/lib/policyCriteria";
 import { ScenarioReviewForm } from "./ScenarioReviewForm";
 import { SavedReviewCard } from "./SavedReviewCard";
 
@@ -263,11 +264,15 @@ function StepSection({
 function ComplianceTable({ variant }: { variant: PolicyVariant }) {
   const agenticByCriterion = new Map(variant.agentic.criteriaVerdicts.map((c) => [c.criterion, c]));
   const changedCriteria = new Set(variant.agentic.toolChangedVerdictFor ?? []);
-  const rows = variant.nonagentic.criteriaVerdicts.map((naC) => ({
-    criterion: naC.criterion,
-    nonagentic: naC,
-    agentic: agenticByCriterion.get(naC.criterion) ?? naC,
-  }));
+  const rows = variant.nonagentic.criteriaVerdicts.map((naC) => {
+    const canonicalName = toCanonicalCriterionName(variant.policyName, naC.criterion);
+    return {
+      criterion: naC.criterion,
+      nonagentic: naC,
+      agentic: agenticByCriterion.get(naC.criterion) ?? naC,
+      toolTagged: isToolTaggedCriterion(variant.policyName, canonicalName),
+    };
+  });
 
   if (rows.length === 0) {
     return <p className="text-sm text-slate-400 dark:text-slate-500">No criteria returned for this judge/policy.</p>;
@@ -275,73 +280,117 @@ function ComplianceTable({ variant }: { variant: PolicyVariant }) {
 
   const nonagenticTexts = splitExplanationByCriterion(variant.nonagentic.explanation);
   const agenticTexts = splitExplanationByCriterion(variant.agentic.explanation);
+  const toolRows = rows.filter((r) => r.toolTagged);
+  const noToolRows = rows.filter((r) => !r.toolTagged);
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3">
       <div className="text-xs text-slate-500 dark:text-slate-400">
         {variant.agentic.toolCallsMade ?? variant.agentic.toolCallLog.length} tool call(s)
         {variant.agentic.judgmentTimeS !== null ? ` · ${variant.agentic.judgmentTimeS.toFixed(1)}s` : ""}
       </div>
-      <div className="overflow-x-auto rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr className="border-b border-slate-200 bg-slate-50 text-left dark:border-slate-700 dark:bg-slate-800">
-              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Criterion</th>
-              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">No tools</th>
-              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">With tools</th>
-              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Tools used</th>
-              <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Suggested Review and Improvement</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const changed = changedCriteria.has(row.criterion) || row.nonagentic.verdict !== row.agentic.verdict;
-              const key = normalizeCriterionName(row.criterion);
-              const nonagenticText = nonagenticTexts.get(key);
-              const agenticText = agenticTexts.get(key);
-              return (
-                <tr
-                  key={row.criterion}
-                  className={`border-b border-slate-100 last:border-0 align-top dark:border-slate-800 ${
-                    changed ? "bg-sky-50/60 dark:bg-sky-950/20" : ""
-                  }`}
-                >
-                  <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-200">
-                    {row.criterion}
-                    {changed && (
-                      <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">
-                        Changed by tool evidence
-                      </div>
+
+      {toolRows.length > 0 && (
+        <div className="flex flex-col gap-2 rounded-md border-2 border-sky-300 bg-sky-50/30 p-2 dark:border-sky-800 dark:bg-sky-950/10">
+          <div className="text-xs font-semibold uppercase tracking-wide text-sky-800 dark:text-sky-300">
+            Tool-requiring criteria ({toolRows.length}) — this is what you&apos;re primarily annotating
+          </div>
+          <CriterionRows rows={toolRows} changedCriteria={changedCriteria} nonagenticTexts={nonagenticTexts} agenticTexts={agenticTexts} />
+        </div>
+      )}
+
+      {noToolRows.length > 0 && (
+        <details className="rounded-md border border-slate-200 dark:border-slate-700" open={toolRows.length === 0}>
+          <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Criteria that don&apos;t require tool use ({noToolRows.length})
+          </summary>
+          <div className="p-2">
+            <CriterionRows rows={noToolRows} changedCriteria={changedCriteria} nonagenticTexts={nonagenticTexts} agenticTexts={agenticTexts} />
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+type ComplianceRow = {
+  criterion: string;
+  nonagentic: CriterionVerdict;
+  agentic: CriterionVerdict;
+  toolTagged: boolean;
+};
+
+function CriterionRows({
+  rows,
+  changedCriteria,
+  nonagenticTexts,
+  agenticTexts,
+}: {
+  rows: ComplianceRow[];
+  changedCriteria: Set<string>;
+  nonagenticTexts: Map<string, string>;
+  agenticTexts: Map<string, string>;
+}) {
+  return (
+    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr className="border-b border-slate-200 bg-slate-50 text-left dark:border-slate-700 dark:bg-slate-800">
+            <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Criterion</th>
+            <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">No tools</th>
+            <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">With tools</th>
+            <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Tools used</th>
+            <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Suggested Review and Improvement</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const changed = changedCriteria.has(row.criterion) || row.nonagentic.verdict !== row.agentic.verdict;
+            const key = normalizeCriterionName(row.criterion);
+            const nonagenticText = nonagenticTexts.get(key);
+            const agenticText = agenticTexts.get(key);
+            return (
+              <tr
+                key={row.criterion}
+                className={`border-b border-slate-100 last:border-0 align-top dark:border-slate-800 ${
+                  changed ? "bg-sky-50/60 dark:bg-sky-950/20" : ""
+                }`}
+              >
+                <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-200">
+                  {row.criterion}
+                  {changed && (
+                    <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">
+                      Changed by tool evidence
+                    </div>
+                  )}
+                </td>
+                <td className="px-3 py-2 max-w-sm">
+                  <div className="flex flex-col gap-1.5">
+                    <VerdictBadge verdict={row.nonagentic.verdict} />
+                    {nonagenticText && (
+                      <p className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap break-words">{nonagenticText}</p>
                     )}
-                  </td>
-                  <td className="px-3 py-2 max-w-sm">
-                    <div className="flex flex-col gap-1.5">
-                      <VerdictBadge verdict={row.nonagentic.verdict} />
-                      {nonagenticText && (
-                        <p className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap break-words">{nonagenticText}</p>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 max-w-sm">
-                    <div className="flex flex-col gap-1.5">
-                      <VerdictBadge verdict={row.agentic.verdict} />
-                      {agenticText && (
-                        <p className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap break-words">{agenticText}</p>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <ToolChips tools={row.agentic.tools_used} />
-                  </td>
-                  <td className="px-3 py-2 max-w-md">
-                    <Evidence criterion={row.agentic} />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                  </div>
+                </td>
+                <td className="px-3 py-2 max-w-sm">
+                  <div className="flex flex-col gap-1.5">
+                    <VerdictBadge verdict={row.agentic.verdict} />
+                    {agenticText && (
+                      <p className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap break-words">{agenticText}</p>
+                    )}
+                  </div>
+                </td>
+                <td className="px-3 py-2">
+                  <ToolChips tools={row.agentic.tools_used} />
+                </td>
+                <td className="px-3 py-2 max-w-md">
+                  <Evidence criterion={row.agentic} />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
