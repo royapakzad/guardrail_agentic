@@ -20,7 +20,7 @@ export function UseCaseNav({ useCase, datasetId }: { useCase: UseCase; datasetId
     { href: `/${useCase}/help`, label: "Help" },
   ];
 
-  const exportHref = `/api/export?useCase=${useCase}${datasetId ? `&dataset=${encodeURIComponent(datasetId)}` : ""}`;
+  const exportBase = `/api/export?useCase=${useCase}${datasetId ? `&dataset=${encodeURIComponent(datasetId)}` : ""}`;
 
   return (
     <nav className="flex flex-wrap items-center gap-1.5 border-b border-slate-200 dark:border-slate-700 pb-3 text-sm">
@@ -42,11 +42,18 @@ export function UseCaseNav({ useCase, datasetId }: { useCase: UseCase; datasetId
         );
       })}
       <a
-        href={exportHref}
+        href={`${exportBase}&format=csv`}
         className="rounded-full px-3 py-1 text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
-        title="Download all saved reviews (structured answers + qualitative codes + quantitative judge data) as a CSV"
+        title="Download all saved reviews (scenario/response text, judge explanations, structured answers, qualitative codes) as a CSV"
       >
-        ⬇ Export
+        ⬇ CSV
+      </a>
+      <a
+        href={`${exportBase}&format=json`}
+        className="rounded-full px-3 py-1 text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+        title="Download all saved reviews (scenario/response text, judge explanations, structured answers, qualitative codes) as JSON"
+      >
+        ⬇ JSON
       </a>
     </nav>
   );
