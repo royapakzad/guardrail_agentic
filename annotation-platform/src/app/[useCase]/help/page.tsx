@@ -119,11 +119,12 @@ export default async function HelpPage({ params }: { params: Promise<{ useCase: 
 
       <HelpSection id="export" title="Exporting your data">
         <p>
-          Click <strong>Export</strong> in the top navigation (on any page) to download a CSV of everything saved for
-          this use case: one row per scenario × policy variant × annotator, joining your structured review and
-          qualitative codes with the judge&apos;s own quantitative data for that row (compliance counts, tool calls
-          made, judgment time, token totals for both passes). Nothing is duplicated into storage ahead of time — the
-          export is built fresh from the live dataset and your saved reviews each time you download it.
+          Click <strong>CSV</strong> or <strong>JSON</strong> in the top navigation (on any page) to download
+          everything saved for this use case: one row per scenario × policy variant × annotator, joining your
+          structured review and qualitative codes with the scenario text, assistant response, and judge explanation
+          for both the English and non-English record, plus the judge&apos;s quantitative data for each (compliance
+          counts, tool calls made, judgment time, token totals). Nothing is duplicated into storage ahead of time —
+          the export is built fresh from the live dataset and your saved reviews each time you download it.
         </p>
       </HelpSection>
     </div>
