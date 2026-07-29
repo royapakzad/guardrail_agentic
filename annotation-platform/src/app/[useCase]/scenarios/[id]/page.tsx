@@ -495,12 +495,36 @@ function ToolActivity({ variant }: { variant: PolicyVariant }) {
             {t.tool} <span className="font-semibold">×{t.count}</span>
           </span>
         ))}
-        {toolSummary.domains.length > 0 && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
-            {toolSummary.domains.length} domains · {toolSummary.totalUrlCount} URL touches · {toolSummary.distinctUrlCount} distinct
-          </span>
-        )}
       </div>
+
+      {toolSummary.domains.length > 0 && (
+        <details className="group w-fit rounded-md border border-sky-200 bg-sky-50/40 dark:border-sky-800 dark:bg-sky-950/10">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 select-none rounded-md px-2.5 py-1 text-xs text-sky-800 hover:bg-sky-100 dark:text-sky-300 dark:hover:bg-sky-950/30">
+            <span>
+              {toolSummary.domains.length} domains · {toolSummary.totalUrlCount} URL touches · {toolSummary.distinctUrlCount} distinct
+            </span>
+            <span className="text-sky-500 transition-transform group-open:rotate-180 dark:text-sky-400">▾</span>
+          </summary>
+          <div className="max-h-56 overflow-y-auto border-t border-sky-200 dark:border-sky-800">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="text-left text-slate-500 dark:text-slate-400">
+                  <th className="px-2.5 py-1.5 font-medium">Domain</th>
+                  <th className="px-2.5 py-1.5 font-medium text-right">Touches</th>
+                </tr>
+              </thead>
+              <tbody>
+                {toolSummary.domains.map((d) => (
+                  <tr key={d.domain} className="border-t border-sky-100 dark:border-sky-900">
+                    <td className="px-2.5 py-1 font-mono text-slate-700 dark:text-slate-300 break-all">{d.domain}</td>
+                    <td className="px-2.5 py-1 text-right tabular-nums text-slate-600 dark:text-slate-400">{d.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
 
       <div className="overflow-x-auto rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
         <table className="w-full text-sm border-collapse">
