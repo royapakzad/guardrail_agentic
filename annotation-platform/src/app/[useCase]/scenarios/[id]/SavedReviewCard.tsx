@@ -68,7 +68,7 @@ function AlignmentEditFields({
       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
       <fieldset>
         <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-          Is your judgment more aligned with the agentic guardrail or the non-agentic guardrail?
+          Which guardrail judgment do you find more reliable and trustworthy?
         </legend>
         <div className="flex flex-col gap-1.5 text-sm">
           {JUDGMENT_ALIGNMENT_OPTIONS.map((option) => (
