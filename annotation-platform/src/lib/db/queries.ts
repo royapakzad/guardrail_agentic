@@ -205,6 +205,16 @@ export async function getDataset(id: number): Promise<Dataset | null> {
   return (rows[0] as Dataset) ?? null;
 }
 
+/** No FK from annotations/gold_labels/code_applications to datasets.id (they're
+ * keyed by scenario_id/use_case instead, which can be shared across multiple
+ * dataset uploads) -- so deleting a dataset row never cascades and never
+ * deletes annotator work. It only removes the upload from the picker list. */
+export async function deleteDataset(id: number): Promise<boolean> {
+  const sql = getSql();
+  const rows = await sql`DELETE FROM datasets WHERE id = ${id} RETURNING id`;
+  return rows.length > 0;
+}
+
 // ── Qualitative coding / thematic analysis (Issue #57) ─────────────────────
 
 export type CodebookCode = {

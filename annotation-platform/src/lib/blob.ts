@@ -1,5 +1,5 @@
 import "server-only";
-import { put, type PutBlobResult } from "@vercel/blob";
+import { put, del, type PutBlobResult } from "@vercel/blob";
 
 /** Same pattern as lib/db/client.ts::getSql() — fail with a clear message up
  * front rather than letting the SDK's own (less specific) error surface. */
@@ -25,4 +25,9 @@ export async function uploadDatasetFile(
     contentType: "application/json",
     token,
   });
+}
+
+export async function deleteDatasetFile(blobUrl: string): Promise<void> {
+  const token = requireBlobToken();
+  await del(blobUrl, { token });
 }
