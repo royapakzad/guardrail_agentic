@@ -48,9 +48,6 @@ export function DatasetPicker({ useCase, datasets, currentId, basePath }: Props)
       <Link href={`/${useCase}/upload`} className="text-slate-500 underline hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">
         upload a new run
       </Link>
-      <Link href={`/${useCase}/datasets`} className="text-slate-500 underline hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">
-        manage uploads
-      </Link>
     </div>
   );
 }
