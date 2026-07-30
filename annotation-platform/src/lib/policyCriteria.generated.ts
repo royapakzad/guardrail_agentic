@@ -96,11 +96,11 @@ export const POLICY_CRITERIA_BY_POLICY: Record<string, { name: string; toolTagge
     },
     {
       "name": "ALTERNATIVE FINANCIAL SYSTEMS",
-      "toolTagged": false
+      "toolTagged": true
     },
     {
       "name": "ACCURACY AND CURRENCY",
-      "toolTagged": false
+      "toolTagged": true
     },
     {
       "name": "HARM VECTORS SPECIFIC TO FINANCIAL CONTEXTS",
@@ -108,6 +108,82 @@ export const POLICY_CRITERIA_BY_POLICY: Record<string, { name: string; toolTagge
     },
     {
       "name": "HANDLING MARKET DATA, RATE LOOKUPS, AND TOOL EVIDENCE",
+      "toolTagged": true
+    }
+  ],
+  "financial_policy_explicit_en_binary": [
+    {
+      "name": "EXPLAINABILITY AND ALGORITHMIC TRANSPARENCY",
+      "toolTagged": false
+    },
+    {
+      "name": "REGULATORY CONTEXT AND DISCLAIMERS",
+      "toolTagged": true
+    },
+    {
+      "name": "DATA RIGHTS AND SURVEILLANCE ARCHITECTURE",
+      "toolTagged": false
+    },
+    {
+      "name": "FIDUCIARY BOUNDARIES",
+      "toolTagged": false
+    },
+    {
+      "name": "POWER ASYMMETRIES AND STRUCTURAL CONSTRAINTS",
+      "toolTagged": false
+    },
+    {
+      "name": "ALTERNATIVE FINANCIAL SYSTEMS",
+      "toolTagged": true
+    },
+    {
+      "name": "ACCURACY AND CURRENCY",
+      "toolTagged": true
+    },
+    {
+      "name": "HARM VECTORS SPECIFIC TO FINANCIAL CONTEXTS",
+      "toolTagged": false
+    },
+    {
+      "name": "HANDLING MARKET DATA, RATE LOOKUPS, AND TOOL EVIDENCE",
+      "toolTagged": true
+    }
+  ],
+  "financial_policy_explicit_esp": [
+    {
+      "name": "EXPLICABILIDAD Y TRANSPARENCIA ALGORÍTMICA",
+      "toolTagged": false
+    },
+    {
+      "name": "CONTEXTO REGULATORIO Y ADVERTENCIAS",
+      "toolTagged": false
+    },
+    {
+      "name": "DERECHOS SOBRE LOS DATOS Y ARQUITECTURA DE VIGILANCIA",
+      "toolTagged": false
+    },
+    {
+      "name": "LÍMITES FIDUCIARIOS",
+      "toolTagged": false
+    },
+    {
+      "name": "ASIMETRÍAS DE PODER Y RESTRICCIONES ESTRUCTURALES",
+      "toolTagged": false
+    },
+    {
+      "name": "SISTEMAS FINANCIEROS ALTERNATIVOS (probablemente requiere herramienta)",
+      "toolTagged": false
+    },
+    {
+      "name": "PRECISIÓN Y ACTUALIDAD  (probablemente requiere herramienta)",
+      "toolTagged": false
+    },
+    {
+      "name": "VECTORES DE DAÑO ESPECÍFICOS DE LOS CONTEXTOS FINANCIEROS  (probablemente requiere herramienta)",
+      "toolTagged": false
+    },
+    {
+      "name": "MANEJO DE DATOS DE MERCADO, CONSULTAS DE TASAS Y EVIDENCIA DE HERRAMIENTAS  (probablemente requiere herramienta)",
       "toolTagged": false
     }
   ],
@@ -370,6 +446,44 @@ export const POLICY_CRITERIA_BY_POLICY: Record<string, { name: string; toolTagge
     }
   ],
   "policy_cybersecurity_explicit": [
+    {
+      "name": "RECOGNITION OF THREAT INDICATORS",
+      "toolTagged": true
+    },
+    {
+      "name": "AUTHENTICITY, DOMAINS, AND SOURCE VERIFICATION",
+      "toolTagged": true
+    },
+    {
+      "name": "PROTECTION OF CREDENTIALS, SECRETS, AND SENSITIVE DATA",
+      "toolTagged": false
+    },
+    {
+      "name": "SAFE RESPONSE AND INCIDENT HANDLING",
+      "toolTagged": false
+    },
+    {
+      "name": "EVIDENCE CALIBRATION AND UNCERTAINTY",
+      "toolTagged": true
+    },
+    {
+      "name": "LIMITS ON FACILITATING ABUSE",
+      "toolTagged": false
+    },
+    {
+      "name": "LEGITIMATE SECURITY, EDUCATION, AND DEFENSIVE USES",
+      "toolTagged": false
+    },
+    {
+      "name": "PRIVACY, DIGNITY, AND NONJUDGMENTAL SUPPORT",
+      "toolTagged": false
+    },
+    {
+      "name": "HANDLING URLSCAN.IO AND URL REPUTATION EVIDENCE",
+      "toolTagged": true
+    }
+  ],
+  "policy_cybersecurity_explicit_binary": [
     {
       "name": "RECOGNITION OF THREAT INDICATORS",
       "toolTagged": true
