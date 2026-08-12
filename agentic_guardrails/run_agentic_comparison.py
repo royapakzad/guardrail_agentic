@@ -186,6 +186,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--assistant-system-prompt-file",
         help="Path to a text file with the assistant system prompt.",
     )
+    p.add_argument(
+        "--skip-response-generation",
+        action="store_true",
+        help=(
+            "Reuse the 'assistant_response' column already present in the input "
+            "CSV instead of calling the assistant LLM. Use this to re-run "
+            "guardrail judges only (e.g. against a different judge model) on "
+            "responses that were already generated and reviewed. Every row must "
+            "have a non-empty assistant_response or the run fails fast."
+        ),
+    )
 
     # ---- Guardrail (non-agentic backend) ------------------------------------
     p.add_argument(
@@ -328,12 +339,14 @@ def process_row(
     specialized_tool_reserve: int = DEFAULT_SPECIALIZED_TOOL_RESERVE,
     verbose: bool = False,
     log_dir: Optional[str] = None,
+    skip_response_generation: bool = False,
 ) -> Dict[str, Any]:
     """
     Full pipeline for one CSV row.
 
     Steps:
-      1. Call assistant LLM once → assistant_response
+      1. Call assistant LLM once → assistant_response (or reuse the CSV's
+         existing assistant_response if skip_response_generation is set)
       2. For each policy × each judge:
          a. Non-agentic guardrail evaluation (uses judge.model_id)
          b. Agentic guardrail evaluation    (uses judge.provider + judge.model)
@@ -364,28 +377,51 @@ def process_row(
             language=language,
         )
 
-    # 1. Call the assistant LLM once — all judges evaluate this same response.
-    assistant_response = call_llm(
-        provider=assistant_provider,
-        model=assistant_model,
-        system_prompt=assistant_system_prompt,
-        user_message=scenario,
-    )
-
-    if logger is not None:
-        logger.log_response_generation(
+    # 1. Get the assistant response — call the LLM once, or reuse the frozen
+    #    response already in the CSV so only the judge(s) re-run.
+    if skip_response_generation:
+        assistant_response = row.get("assistant_response", "")
+        if not assistant_response:
+            raise ValueError(
+                f"--skip-response-generation set but row id={scenario_id} has no "
+                "assistant_response to reuse."
+            )
+        # Preserve the response's original provenance instead of stamping it
+        # with the CLI's --provider/--model (which weren't used to generate it).
+        used_provider = row.get("provider") or assistant_provider
+        used_model = row.get("model") or assistant_model
+        if logger is not None:
+            logger.log_response_generation(
+                provider=used_provider,
+                model=used_model,
+                system_prompt=assistant_system_prompt,
+                user_message=scenario,
+                assistant_response=assistant_response,
+            )
+    else:
+        assistant_response = call_llm(
             provider=assistant_provider,
             model=assistant_model,
             system_prompt=assistant_system_prompt,
             user_message=scenario,
-            assistant_response=assistant_response,
         )
+        used_provider = assistant_provider
+        used_model = assistant_model
+
+        if logger is not None:
+            logger.log_response_generation(
+                provider=assistant_provider,
+                model=assistant_model,
+                system_prompt=assistant_system_prompt,
+                user_message=scenario,
+                assistant_response=assistant_response,
+            )
 
     out: Dict[str, Any] = dict(row)
     out.update(
         {
-            "provider": assistant_provider,
-            "model": assistant_model,
+            "provider": used_provider,
+            "model": used_model,
             "assistant_system_prompt": assistant_system_prompt,
             "assistant_response": assistant_response,
             "guardrail_backend": guardrail.backend_name,  # PR #11: canonical name
@@ -781,6 +817,7 @@ def main() -> None:
                 specialized_tool_reserve=args.specialized_tool_reserve,
                 verbose=args.verbose,
                 log_dir=log_dir,
+                skip_response_generation=args.skip_response_generation,
             )
         except Exception as e:
             # Preserve original columns and append the error so the row is
