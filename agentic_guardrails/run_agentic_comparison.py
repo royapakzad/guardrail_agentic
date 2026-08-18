@@ -21,8 +21,12 @@ Pipeline per scenario row
   3. Compare both judgments  → score delta, judgment_changed, sources used
 
 Both non-agentic and agentic explanations use the same numbered-criterion format
-(one entry per policy criterion), so the only variable between the two paths is
-whether the judge had access to retrieval tools.
+(one entry per policy criterion). Whether the only variable between the two
+paths is genuinely "did the judge have retrieval tools" depends on
+--judge-granularity: "split" (default) gives the agentic judge only the
+tool-tagged criteria subset, a different (smaller) policy document than the
+non-agentic judge sees; "full-policy" (Issue #91) gives both judges the
+identical, full policy text, so tool access really is the only variable.
 
 Usage example
 ~~~~~~~~~~~~~
@@ -47,6 +51,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import re
 import sys
@@ -68,9 +73,12 @@ from guardrails_runner import (
     create_guardrail,
     load_text_file,
     build_guardrail_input_text,
+    run_guardrail_for_policy,
+    NonAgenticJudgment,
 )
 from agentic_runner import (
     run_split_criteria_guardrail,
+    run_full_policy_guardrail,
     AgenticJudgment,
     DEFAULT_SPECIALIZED_TOOL_RESERVE,
 )
@@ -139,6 +147,53 @@ def _count_tokens(text: str, model: str = "gpt-4o") -> int:
     except ImportError:
         # tiktoken not installed — fall back to character heuristic.
         return max(1, len(text) // 4)
+
+
+def _parse_frozen_nonagentic(row: Dict[str, Any], base: str) -> NonAgenticJudgment:
+    """
+    Reconstruct a NonAgenticJudgment from a prior run's frozen output columns
+    (--judge-mode agentic-only, Issue #91) instead of calling the non-agentic
+    judge again.
+
+    Mirrors --skip-response-generation's reuse-and-fail-fast pattern one level
+    up: reuses judge output instead of assistant output. `row` came from
+    csv.DictReader, so every value is a plain string; list-valued columns
+    (criteria_verdicts, improvements) were JSON-encoded by output_writer.py's
+    _csv_safe() and need json.loads() back into Python objects.
+
+    Raises ValueError (caught by the per-row try/except in main(), same as
+    every other process_row failure) if the row has no frozen score for this
+    policy/judge — i.e. it was never run with judge_mode="both"/"non-agentic-only".
+    """
+    score_key = f"{base}_nonagentic_score"
+    score_raw = row.get(score_key, "")
+    if score_raw in ("", None):
+        raise ValueError(
+            f"--judge-mode agentic-only set but row id={row.get('id', 'unknown')} has no "
+            f"frozen {score_key} to reuse. Run with --judge-mode both first to collect "
+            "non-agentic verdicts for this policy/judge, or use --judge-mode both here."
+        )
+
+    def _load_list(key: str) -> list:
+        raw = row.get(key, "")
+        if not raw:
+            return []
+        if isinstance(raw, str):
+            return json.loads(raw)
+        return raw  # already a list, e.g. if the input was read as JSON upstream
+
+    valid_raw = row.get(f"{base}_nonagentic_valid", "")
+    valid: Optional[bool] = (
+        None if valid_raw in ("", None) else str(valid_raw).strip().lower() == "true"
+    )
+
+    return NonAgenticJudgment(
+        valid=valid,
+        score=float(score_raw),
+        explanation=row.get(f"{base}_nonagentic_explanation", "") or "",
+        criteria_verdicts=_load_list(f"{base}_nonagentic_criteria_verdicts"),
+        improvements=_load_list(f"{base}_nonagentic_improvements"),
+    )
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -315,6 +370,39 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--judge-granularity",
+        default="split",
+        choices=["split", "full-policy"],
+        help=(
+            "How the agentic judge's policy scope compares to the non-agentic judge's "
+            "(default: split). split: agentic_runner.run_split_criteria_guardrail -- "
+            "non-agentic sees the full policy, agentic sees ONLY the tool-tagged subset "
+            "(smaller, renumbered document). full-policy: agentic_runner."
+            "run_full_policy_guardrail (Issue #91) -- both judges see the identical, "
+            "full, untouched policy text; the only variable between them is tool access. "
+            "The agentic judge is told to use tools only for criteria tagged '(potentially "
+            "needs tool calls)' and to judge every other criterion from response text "
+            "alone, in the same call."
+        ),
+    )
+    p.add_argument(
+        "--judge-mode",
+        default="both",
+        choices=["both", "agentic-only", "non-agentic-only"],
+        help=(
+            "Which judge call(s) to actually run (default: both). non-agentic-only: skip "
+            "the agentic call entirely -- works with any --judge-granularity. agentic-only: "
+            "skip the non-agentic LLM call and reuse frozen non-agentic verdicts already "
+            "present in the input file's <policy>_<judge>_nonagentic_* columns instead "
+            "(fails fast per row if they're missing) -- lets you patch new agentic verdicts "
+            "onto data you already collected without re-paying for the non-agentic call. "
+            "Only supported with --judge-granularity full-policy, since only there is the "
+            "agentic call self-sufficient (it produces its own verdict for every "
+            "criterion, so it never needs a fresh non-agentic call to fall back on for "
+            "criteria it didn't tool-verify)."
+        ),
+    )
+    p.add_argument(
         "--verbose",
         action="store_true",
         help="Print tool calls and search results in real time.",
@@ -340,6 +428,8 @@ def process_row(
     verbose: bool = False,
     log_dir: Optional[str] = None,
     skip_response_generation: bool = False,
+    judge_granularity: str = "split",
+    judge_mode: str = "both",
 ) -> Dict[str, Any]:
     """
     Full pipeline for one CSV row.
@@ -348,8 +438,10 @@ def process_row(
       1. Call assistant LLM once → assistant_response (or reuse the CSV's
          existing assistant_response if skip_response_generation is set)
       2. For each policy × each judge:
-         a. Non-agentic guardrail evaluation (uses judge.model_id)
+         a. Non-agentic guardrail evaluation (uses judge.model_id) -- skipped
+            when judge_mode="agentic-only" (frozen columns reused instead)
          b. Agentic guardrail evaluation    (uses judge.provider + judge.model)
+            -- skipped when judge_mode="non-agentic-only"
          c. Comparison
       3. Return flat dict with all output columns.
 
@@ -359,6 +451,16 @@ def process_row(
       {policy}_{judge_label}_agentic_score
       {policy}_{judge_label}_score_delta
       ... etc.
+
+    judge_granularity: "split" (agentic_runner.run_split_criteria_guardrail,
+        default) or "full-policy" (agentic_runner.run_full_policy_guardrail,
+        Issue #91) -- see --judge-granularity help text for the difference.
+
+    judge_mode: "both" (default), "non-agentic-only" (skip the agentic call),
+        or "agentic-only" (skip the non-agentic LLM call and reuse frozen
+        {policy}_{judge}_nonagentic_* columns already present in `row` --
+        only valid with judge_granularity="full-policy", enforced by the CLI
+        parser before process_row is ever called).
     """
     if "scenario" not in row:
         raise ValueError("Input CSV row is missing the required 'scenario' column.")
@@ -430,6 +532,8 @@ def process_row(
             "web_search_tool": web_search_tool,
             "tool_group": tool_group,  # PR #15
             "specialized_tool_reserve": specialized_tool_reserve,
+            "judge_granularity": judge_granularity,  # Issue #91
+            "judge_mode": judge_mode,  # Issue #91
         }
     )
 
@@ -456,41 +560,83 @@ def process_row(
 
             # Every policy in this codebase uses the [TOOLS: ...]/"(potentially
             # needs tool calls)" explicit tagging convention (policy_criteria.py)
-            # — see that module's docstring for the tagging syntax. Both judge
-            # calls run concurrently: non-agentic over the full policy, agentic
-            # (with tools) over only the tool-requiring criteria subset.
+            # — see that module's docstring for the tagging syntax.
             na_prompt_tokens = _count_tokens(nonagentic_eval_text, model=judge.model)
             # Only used for the combined _total_judgment_time_s checkpoint
             # below -- each pass's own judgment_time_s (gr.judgment_time_s /
             # aj.judgment_time_s) is measured in isolation inside
             # run_guardrail_for_policy() / run_agentic_guardrail(), since
-            # both run concurrently in run_split_criteria_guardrail's thread
-            # pool and a single wrapping timer here can't separate them.
+            # both run concurrently in the guardrail-runner functions' own
+            # thread pools and a single wrapping timer here can't separate them.
             _na_start = time.perf_counter()
             na_error: Optional[Exception] = None
             aj: Optional[AgenticJudgment] = None
 
             if verbose:
-                print(f"        split-criteria eval ...", end=" ", flush=True)
+                print(f"        {judge_granularity} [{judge_mode}] eval ...", end=" ", flush=True)
             try:
-                gr, aj = run_split_criteria_guardrail(
-                    guardrail=guardrail,
-                    provider=judge.provider,
-                    guardrail_model=judge.model,
-                    model_id=judge.model_id,
-                    policy_text=policy_text,
-                    rubric=rubric,
-                    system_prompt=assistant_system_prompt,
-                    user_message=scenario,
-                    assistant_response=assistant_response,
-                    max_tool_calls=max_tool_calls,
-                    tool_group=tool_group,  # PR #15
-                    specialized_tool_reserve=specialized_tool_reserve,
-                    verbose=verbose,
-                    logger=logger,
-                    policy_label=f"{policy_label}[{judge.model_id}]",
-                    scenario_language=language or "en",
-                )
+                if judge_mode == "non-agentic-only":
+                    # Skip the agentic call entirely -- works for any granularity,
+                    # since it never needs the agentic side at all.
+                    gr = run_guardrail_for_policy(
+                        guardrail=guardrail,
+                        policy_text=policy_text,
+                        rubric=rubric,
+                        system_prompt=assistant_system_prompt,
+                        user_message=scenario,
+                        assistant_response=assistant_response,
+                        model_id=judge.model_id,
+                    )
+                    aj = AgenticJudgment(
+                        valid=None, score=None, explanation="", tool_calls_made=0
+                    )
+                elif judge_mode == "agentic-only":
+                    # Only reachable with judge_granularity="full-policy" -- the
+                    # CLI parser rejects any other combination before this point.
+                    frozen_na = _parse_frozen_nonagentic(row, base)
+                    gr, aj = run_full_policy_guardrail(
+                        guardrail=guardrail,
+                        provider=judge.provider,
+                        guardrail_model=judge.model,
+                        model_id=judge.model_id,
+                        policy_text=policy_text,
+                        rubric=rubric,
+                        system_prompt=assistant_system_prompt,
+                        user_message=scenario,
+                        assistant_response=assistant_response,
+                        max_tool_calls=max_tool_calls,
+                        tool_group=tool_group,
+                        specialized_tool_reserve=specialized_tool_reserve,
+                        verbose=verbose,
+                        logger=logger,
+                        policy_label=f"{policy_label}[{judge.model_id}]",
+                        scenario_language=language or "en",
+                        frozen_nonagentic=frozen_na,
+                    )
+                else:  # judge_mode == "both"
+                    _guardrail_fn = (
+                        run_full_policy_guardrail
+                        if judge_granularity == "full-policy"
+                        else run_split_criteria_guardrail
+                    )
+                    gr, aj = _guardrail_fn(
+                        guardrail=guardrail,
+                        provider=judge.provider,
+                        guardrail_model=judge.model,
+                        model_id=judge.model_id,
+                        policy_text=policy_text,
+                        rubric=rubric,
+                        system_prompt=assistant_system_prompt,
+                        user_message=scenario,
+                        assistant_response=assistant_response,
+                        max_tool_calls=max_tool_calls,
+                        tool_group=tool_group,  # PR #15
+                        specialized_tool_reserve=specialized_tool_reserve,
+                        verbose=verbose,
+                        logger=logger,
+                        policy_label=f"{policy_label}[{judge.model_id}]",
+                        scenario_language=language or "en",
+                    )
             except Exception as e:
                 na_error = e
                 gr = None
@@ -527,7 +673,8 @@ def process_row(
                     na_time = gr.judgment_time_s
                     print(f"score={gr.score}  valid={gr.valid}  tokens={na_total_tokens:,}  time={na_time and f'{na_time:.2f}s'}")
                     ag_time = aj.judgment_time_s
-                    print(f"        agentic (tool-subset) score={aj.score}  valid={aj.valid}  time={ag_time and f'{ag_time:.2f}s'} (concurrent with non-agentic)")
+                    ag_scope = "tool-subset" if judge_granularity == "split" else "full-policy"
+                    print(f"        agentic ({ag_scope}) score={aj.score}  valid={aj.valid}  time={ag_time and f'{ag_time:.2f}s'} (concurrent with non-agentic)")
             else:
                 out[f"{base}_nonagentic_valid"] = None
                 out[f"{base}_nonagentic_score"] = None
@@ -669,6 +816,18 @@ def main() -> None:
         )
     print(f"Tool group: {args.tool_group}")
     print(f"Specialized tool reserve: {args.specialized_tool_reserve}")
+
+    # ---- Validate judge-mode / judge-granularity combination ----------------
+    if args.judge_mode == "agentic-only" and args.judge_granularity != "full-policy":
+        parser.error(
+            "--judge-mode agentic-only requires --judge-granularity full-policy: only "
+            "the full-policy agentic call is self-sufficient (it judges every criterion "
+            "itself, so it never needs a fresh non-agentic call to fall back on for "
+            "criteria it didn't tool-verify). split mode's agentic call only judges the "
+            "tool-tagged subset and needs a non-agentic call's verdicts to cover the rest."
+        )
+    print(f"Judge granularity: {args.judge_granularity}")
+    print(f"Judge mode: {args.judge_mode}")
 
     # ---- Load shared text configs -------------------------------------------
     # These files are read once and passed to every row's evaluation.
@@ -818,6 +977,8 @@ def main() -> None:
                 verbose=args.verbose,
                 log_dir=log_dir,
                 skip_response_generation=args.skip_response_generation,
+                judge_granularity=args.judge_granularity,
+                judge_mode=args.judge_mode,
             )
         except Exception as e:
             # Preserve original columns and append the error so the row is

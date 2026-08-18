@@ -234,3 +234,20 @@ def test_prompt_does_not_hardcode_factuality_actionability_scope():
 def test_prompt_instructs_exact_criterion_name_copy():
     prompt = build_agentic_guardrail_system_prompt(policy="1. TEST\n- desc", rubric="r")
     assert "MUST be copied EXACTLY" in prompt
+
+
+def test_prompt_does_not_narrow_verification_to_generic_tools_only():
+    """Regression coverage (Issue #91 follow-up): the framing paragraph and the
+    tool-signal list must point the judge at whichever tool applies -- generic
+    (search/URL/acronym) or this domain's specialized tools (sanctions,
+    registration, URL reputation, crypto address, ...) -- not just the four
+    generic checks, or a financial/cybersecurity judge could under-use
+    broker_license_check, sanctions_screen, urlscan_check, etc. in favor of
+    generic search_web."""
+    prompt = build_agentic_guardrail_system_prompt(
+        policy="1. TEST\n- desc", rubric="r", tool_group="financial"
+    )
+    assert "specialized tools" in prompt
+    assert "sanctions" in prompt.lower()
+    assert "do not default to generic web search" in prompt.lower()
+    assert "domain-specific tool result" in prompt
