@@ -366,7 +366,17 @@ function CriterionRows({
                 }`}
               >
                 <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-200">
-                  {row.criterion}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span>{row.criterion}</span>
+                    {row.toolTagged && (
+                      <span
+                        title='Tagged "(potentially needs tool calls)" in the policy'
+                        className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-300"
+                      >
+                        🔧 Tool-tagged
+                      </span>
+                    )}
+                  </div>
                   {toolCaused && (
                     <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">
                       Changed by tool evidence
@@ -395,7 +405,7 @@ function CriterionRows({
                   </div>
                 </td>
                 <td className="px-3 py-2">
-                  <ToolChips tools={row.agentic.tools_used} />
+                  <ToolChips tools={row.agentic.tools_used} toolTagged={row.toolTagged} />
                 </td>
                 <td className="px-3 py-2 max-w-md">
                   <Evidence criterion={row.agentic} />
@@ -452,8 +462,18 @@ function splitExplanationByCriterion(explanation: string): Map<string, string> {
   return map;
 }
 
-function ToolChips({ tools }: { tools?: string[] }) {
-  if (!Array.isArray(tools) || tools.length === 0) return <span className="text-slate-300 dark:text-slate-600">—</span>;
+function ToolChips({ tools, toolTagged }: { tools?: string[]; toolTagged: boolean }) {
+  if (!Array.isArray(tools) || tools.length === 0) {
+    // A bare "—" here reads as missing data. For a tool-tagged criterion it
+    // isn't -- the judge had tools available and chose not to call one for
+    // this specific criterion (e.g. nothing in the response triggered it).
+    // Say so explicitly instead of leaving an unexplained blank.
+    return toolTagged ? (
+      <span className="text-xs italic text-slate-400 dark:text-slate-500">No tool call made</span>
+    ) : (
+      <span className="text-slate-300 dark:text-slate-600">—</span>
+    );
+  }
   return (
     <div className="flex flex-wrap gap-1">
       {tools.map((t, i) => (
