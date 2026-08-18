@@ -280,35 +280,20 @@ function ComplianceTable({ variant }: { variant: PolicyVariant }) {
 
   const nonagenticTexts = splitExplanationByCriterion(variant.nonagentic.explanation);
   const agenticTexts = splitExplanationByCriterion(variant.agentic.explanation);
-  const toolRows = rows.filter((r) => r.toolTagged);
-  const noToolRows = rows.filter((r) => !r.toolTagged);
 
+  // Every criterion the policy defines, in policy order, always visible --
+  // no grouping into a "primary" tool-requiring set vs. a collapsed
+  // secondary one. Both judges evaluate every criterion (Issue #91's
+  // full-policy mode), so there's no basis for treating one subset as more
+  // worth an annotator's attention than the other; the inline Tool-tagged /
+  // Non-tool-use badge on each row is the only classification shown.
   return (
     <div className="flex flex-col gap-3">
       <div className="text-xs text-slate-500 dark:text-slate-400">
         {variant.agentic.toolCallsMade ?? variant.agentic.toolCallLog.length} tool call(s)
         {variant.agentic.judgmentTimeS !== null ? ` · ${variant.agentic.judgmentTimeS.toFixed(1)}s` : ""}
       </div>
-
-      {toolRows.length > 0 && (
-        <div className="flex flex-col gap-2 rounded-md border-2 border-sky-300 bg-sky-50/30 p-2 dark:border-sky-800 dark:bg-sky-950/10">
-          <div className="text-xs font-semibold uppercase tracking-wide text-sky-800 dark:text-sky-300">
-            Tool-requiring criteria ({toolRows.length}) — this is what you&apos;re primarily annotating
-          </div>
-          <CriterionRows rows={toolRows} changedCriteria={changedCriteria} nonagenticTexts={nonagenticTexts} agenticTexts={agenticTexts} />
-        </div>
-      )}
-
-      {noToolRows.length > 0 && (
-        <details className="rounded-md border border-slate-200 dark:border-slate-700" open={toolRows.length === 0}>
-          <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            Criteria that don&apos;t require tool use ({noToolRows.length})
-          </summary>
-          <div className="p-2">
-            <CriterionRows rows={noToolRows} changedCriteria={changedCriteria} nonagenticTexts={nonagenticTexts} agenticTexts={agenticTexts} />
-          </div>
-        </details>
-      )}
+      <CriterionRows rows={rows} changedCriteria={changedCriteria} nonagenticTexts={nonagenticTexts} agenticTexts={agenticTexts} />
     </div>
   );
 }
@@ -339,8 +324,7 @@ function CriterionRows({
             <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Criterion</th>
             <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">No tools</th>
             <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">With tools</th>
-            <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Tools used</th>
-            <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Suggested Review and Improvement</th>
+            <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Tools used / influenced</th>
           </tr>
         </thead>
         <tbody>
@@ -368,12 +352,19 @@ function CriterionRows({
                 <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-200">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span>{row.criterion}</span>
-                    {row.toolTagged && (
+                    {row.toolTagged ? (
                       <span
                         title='Tagged "(potentially needs tool calls)" in the policy'
                         className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-300"
                       >
                         🔧 Tool-tagged
+                      </span>
+                    ) : (
+                      <span
+                        title="Not tagged for tool use in the policy"
+                        className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                      >
+                        Non-tool-use
                       </span>
                     )}
                   </div>
@@ -394,6 +385,7 @@ function CriterionRows({
                     {nonagenticText && (
                       <p className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap break-words">{nonagenticText}</p>
                     )}
+                    <Evidence criterion={row.nonagentic} />
                   </div>
                 </td>
                 <td className="px-3 py-2 max-w-sm">
@@ -402,13 +394,14 @@ function CriterionRows({
                     {agenticText && (
                       <p className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap break-words">{agenticText}</p>
                     )}
+                    <Evidence criterion={row.agentic} />
                   </div>
                 </td>
                 <td className="px-3 py-2">
-                  <ToolChips tools={row.agentic.tools_used} toolTagged={row.toolTagged} />
-                </td>
-                <td className="px-3 py-2 max-w-md">
-                  <Evidence criterion={row.agentic} />
+                  <div className="flex flex-col gap-1">
+                    <ToolChips tools={row.agentic.tools_used} toolTagged={row.toolTagged} />
+                    <ToolInfluencedTag toolInfluenced={row.agentic.tool_influenced} />
+                  </div>
                 </td>
               </tr>
             );
@@ -485,10 +478,27 @@ function ToolChips({ tools, toolTagged }: { tools?: string[]; toolTagged: boolea
   );
 }
 
+/** Renders the raw `tool_influenced` field from the agentic criterion's own
+ * JSON, verbatim -- true/false/not-reported are three distinct real states
+ * (the field is optional, see CriterionVerdict), not inferred from anything
+ * else on the row. */
+function ToolInfluencedTag({ toolInfluenced }: { toolInfluenced?: boolean }) {
+  if (toolInfluenced === true) {
+    return <span className="text-[10px] font-medium text-sky-700 dark:text-sky-400">tool_influenced: true</span>;
+  }
+  if (toolInfluenced === false) {
+    return <span className="text-[10px] text-slate-400 dark:text-slate-500">tool_influenced: false</span>;
+  }
+  return <span className="text-[10px] italic text-slate-300 dark:text-slate-600">tool_influenced: not reported</span>;
+}
+
 function Evidence({ criterion }: { criterion: CriterionVerdict }) {
   const review = typeof criterion.human_review_needed === "string" ? criterion.human_review_needed : "";
   const fix = typeof criterion.suggested_improvement === "string" ? criterion.suggested_improvement : "";
-  if (!review && !fix) return <span className="text-slate-300 dark:text-slate-600">—</span>;
+  // Nested inline under the verdict/explanation now (folded in from the old
+  // standalone column, one per side) -- nothing to add when both fields are
+  // empty in the JSON, so render nothing rather than a redundant dash.
+  if (!review && !fix) return null;
   return (
     <div className="flex flex-col gap-1 text-xs">
       {review && <div className="text-slate-700 dark:text-slate-300">{review}</div>}
