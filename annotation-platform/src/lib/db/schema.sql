@@ -110,3 +110,25 @@ ALTER TABLE annotations DROP COLUMN IF EXISTS disagreement_reason;
 ALTER TABLE annotations DROP COLUMN IF EXISTS evidentiary_attribution_present;
 ALTER TABLE annotations DROP COLUMN IF EXISTS judgment_alignment;
 ALTER TABLE annotations DROP COLUMN IF EXISTS alignment_explanation;
+
+-- Scope annotations/code_applications to the dataset they were made against
+-- (bug fix). Before this, a saved review was keyed only by
+-- (use_case, scenario_id, language, policy_label, annotator_name) -- with no
+-- dataset in that key at all, uploading a NEW dataset that happens to reuse
+-- the same scenario id and policy label (extremely common: every re-run of
+-- the same scenario set produces the same ids) surfaced the OLD dataset's
+-- saved annotations and qualitative codes on the new dataset's scenario page,
+-- even though the underlying response/judge output could be completely
+-- different now. TEXT, not an INTEGER FK to datasets(id), because a
+-- DatasetId is either a real dataset row's id or the literal string "seed"
+-- for the bundled sample data (see lib/datasetId.ts).
+--
+-- Existing rows get NULL here (we don't know what dataset they were made
+-- against) and, going forward, deliberately fall out of the normal
+-- dataset-scoped list queries -- surfacing them under an unrelated dataset
+-- would just be re-committing the same bug, so this intentionally drops
+-- visibility on old, unattributable reviews rather than guessing.
+ALTER TABLE annotations ADD COLUMN IF NOT EXISTS dataset_id TEXT;
+ALTER TABLE code_applications ADD COLUMN IF NOT EXISTS dataset_id TEXT;
+CREATE INDEX IF NOT EXISTS annotations_dataset_idx ON annotations (use_case, scenario_id, dataset_id);
+CREATE INDEX IF NOT EXISTS code_applications_dataset_idx ON code_applications (use_case, scenario_id, dataset_id);

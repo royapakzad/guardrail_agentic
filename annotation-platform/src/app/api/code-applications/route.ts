@@ -11,13 +11,14 @@ function isUseCase(value: unknown): value is UseCase {
 export async function GET(request: NextRequest) {
   const useCase = request.nextUrl.searchParams.get("useCase");
   const scenarioId = request.nextUrl.searchParams.get("scenarioId");
+  const datasetId = request.nextUrl.searchParams.get("datasetId");
 
-  if (!isUseCase(useCase) || !scenarioId) {
-    return NextResponse.json({ error: "useCase and scenarioId query params are required" }, { status: 400 });
+  if (!isUseCase(useCase) || !scenarioId || !datasetId) {
+    return NextResponse.json({ error: "useCase, scenarioId, and datasetId query params are required" }, { status: 400 });
   }
 
   try {
-    const applications = await listCodeApplications(useCase, scenarioId);
+    const applications = await listCodeApplications(useCase, scenarioId, datasetId);
     return NextResponse.json({ applications });
   } catch (error) {
     return dbErrorResponse(error);
@@ -30,12 +31,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { scenarioId, useCase, language, policyLabel, annotatorName, codeId, targetField } = body;
-  if (!scenarioId || !isUseCase(useCase) || !language || !policyLabel || !annotatorName || !codeId || !targetField) {
+  const { scenarioId, useCase, language, policyLabel, annotatorName, datasetId, codeId, targetField } = body;
+  if (!scenarioId || !isUseCase(useCase) || !language || !policyLabel || !annotatorName || !datasetId || !codeId || !targetField) {
     return NextResponse.json(
       {
         error:
-          "scenarioId, useCase, language, policyLabel, annotatorName, codeId, and targetField are required",
+          "scenarioId, useCase, language, policyLabel, annotatorName, datasetId, codeId, and targetField are required",
       },
       { status: 400 }
     );
@@ -53,6 +54,7 @@ export async function POST(request: NextRequest) {
       language: String(language),
       policyLabel: String(policyLabel),
       annotatorName: String(annotatorName),
+      datasetId: String(datasetId),
       codeId: codeIdNum,
       targetField: String(targetField),
       quoteText: body.quoteText ? String(body.quoteText) : null,
