@@ -345,7 +345,16 @@ function CriterionRows({
         </thead>
         <tbody>
           {rows.map((row) => {
-            const changed = changedCriteria.has(row.criterion) || row.nonagentic.verdict !== row.agentic.verdict;
+            // "Changed by tool evidence" is only an accurate claim for a
+            // tool-tagged criterion -- that's the only case where the agentic
+            // pass actually had tool access for THIS criterion. A non-tagged
+            // criterion's verdict can still differ (in full-policy mode the
+            // agentic pass judges every criterion itself, tool or not — see
+            // Issue #91), but no tool caused it, so it gets a neutral label
+            // instead of implying tool causation it doesn't have.
+            const verdictDiffers = row.nonagentic.verdict !== row.agentic.verdict;
+            const toolCaused = row.toolTagged && (changedCriteria.has(row.criterion) || verdictDiffers);
+            const changed = toolCaused || verdictDiffers;
             const key = normalizeCriterionName(row.criterion);
             const nonagenticText = nonagenticTexts.get(key);
             const agenticText = agenticTexts.get(key);
@@ -358,9 +367,14 @@ function CriterionRows({
               >
                 <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-200">
                   {row.criterion}
-                  {changed && (
+                  {toolCaused && (
                     <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">
                       Changed by tool evidence
+                    </div>
+                  )}
+                  {!toolCaused && verdictDiffers && (
+                    <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+                      Verdict differs (no tool involved)
                     </div>
                   )}
                 </td>
