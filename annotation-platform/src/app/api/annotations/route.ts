@@ -17,13 +17,14 @@ function isUseCase(value: unknown): value is UseCase {
 export async function GET(request: NextRequest) {
   const useCase = request.nextUrl.searchParams.get("useCase");
   const scenarioId = request.nextUrl.searchParams.get("scenarioId");
+  const datasetId = request.nextUrl.searchParams.get("datasetId");
 
-  if (!isUseCase(useCase) || !scenarioId) {
-    return NextResponse.json({ error: "useCase and scenarioId query params are required" }, { status: 400 });
+  if (!isUseCase(useCase) || !scenarioId || !datasetId) {
+    return NextResponse.json({ error: "useCase, scenarioId, and datasetId query params are required" }, { status: 400 });
   }
 
   try {
-    const annotations = await listAnnotations(useCase, scenarioId);
+    const annotations = await listAnnotations(useCase, scenarioId, datasetId);
     return NextResponse.json({ annotations });
   } catch (error) {
     return dbErrorResponse(error);
@@ -36,10 +37,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { scenarioId, useCase, language, policyLabel, annotatorName } = body;
-  if (!scenarioId || !isUseCase(useCase) || !language || !policyLabel || !annotatorName) {
+  const { scenarioId, useCase, language, policyLabel, annotatorName, datasetId } = body;
+  if (!scenarioId || !isUseCase(useCase) || !language || !policyLabel || !annotatorName || !datasetId) {
     return NextResponse.json(
-      { error: "scenarioId, useCase, language, policyLabel, and annotatorName are required" },
+      { error: "scenarioId, useCase, language, policyLabel, annotatorName, and datasetId are required" },
       { status: 400 }
     );
   }
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
       language: String(language),
       policyLabel: String(policyLabel),
       annotatorName: String(annotatorName),
+      datasetId: String(datasetId),
       evidenceSourceType: body.evidenceSourceType ?? null,
       deductionReasonCategory: body.deductionReasonCategory ?? null,
       judgmentAlignmentEn: body.judgmentAlignmentEn ?? null,

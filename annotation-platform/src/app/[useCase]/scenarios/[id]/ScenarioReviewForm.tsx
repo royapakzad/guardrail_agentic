@@ -16,6 +16,7 @@ type Props = {
   scenarioId: string;
   language: string;
   policyLabel: string;
+  datasetId: string;
   codes: CodebookCode[];
 };
 
@@ -50,7 +51,7 @@ function emptyRow(): CodeRow {
   };
 }
 
-export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel, codes: initialCodes }: Props) {
+export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel, datasetId, codes: initialCodes }: Props) {
   const router = useRouter();
   const [codes, setCodes] = useState<CodebookCode[]>(initialCodes);
   const [rows, setRows] = useState<CodeRow[]>([emptyRow()]);
@@ -124,6 +125,7 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
         useCase,
         language,
         policyLabel,
+        datasetId,
         annotatorName,
         evidenceSourceType: null,
         deductionReasonCategory: null,
@@ -154,6 +156,7 @@ export function ScenarioReviewForm({ useCase, scenarioId, language, policyLabel,
             useCase,
             language,
             policyLabel,
+            datasetId,
             annotatorName,
             codeId: Number(row.codeId),
             targetField: row.targetField || "other",

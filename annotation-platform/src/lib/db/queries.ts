@@ -9,6 +9,10 @@ export type Annotation = {
   language: string;
   policy_label: string;
   annotator_name: string;
+  /** DatasetId (from lib/datasetId.ts) as a string, or null for rows saved
+   * before dataset-scoping existed -- those intentionally no longer surface
+   * via listAnnotations, see schema.sql's dataset_id migration note. */
+  dataset_id: string | null;
   evidence_source_type: string | null;
   deduction_reason_category: string | null;
   judgment_alignment_en: string | null;
@@ -27,6 +31,10 @@ export type NewAnnotation = {
   language: string;
   policyLabel: string;
   annotatorName: string;
+  /** DatasetId (from lib/datasetId.ts) as a string -- required so this
+   * annotation only ever surfaces on the dataset it was actually made
+   * against, see schema.sql's dataset_id migration note. */
+  datasetId: string;
   evidenceSourceType: string | null;
   deductionReasonCategory: string | null;
   judgmentAlignmentEn: string | null;
@@ -41,13 +49,13 @@ export async function insertAnnotation(input: NewAnnotation): Promise<Annotation
   const sql = getSql();
   const rows = await sql`
     INSERT INTO annotations (
-      scenario_id, use_case, language, policy_label, annotator_name,
+      scenario_id, use_case, language, policy_label, annotator_name, dataset_id,
       evidence_source_type, deduction_reason_category,
       judgment_alignment_en, alignment_explanation_en,
       judgment_alignment_non_en, alignment_explanation_non_en,
       free_text, confidence
     ) VALUES (
-      ${input.scenarioId}, ${input.useCase}, ${input.language}, ${input.policyLabel}, ${input.annotatorName},
+      ${input.scenarioId}, ${input.useCase}, ${input.language}, ${input.policyLabel}, ${input.annotatorName}, ${input.datasetId},
       ${input.evidenceSourceType}, ${input.deductionReasonCategory},
       ${input.judgmentAlignmentEn}, ${input.alignmentExplanationEn},
       ${input.judgmentAlignmentNonEn}, ${input.alignmentExplanationNonEn},
@@ -58,11 +66,11 @@ export async function insertAnnotation(input: NewAnnotation): Promise<Annotation
   return rows[0] as Annotation;
 }
 
-export async function listAnnotations(useCase: UseCase, scenarioId: string): Promise<Annotation[]> {
+export async function listAnnotations(useCase: UseCase, scenarioId: string, datasetId: string): Promise<Annotation[]> {
   const sql = getSql();
   const rows = await sql`
     SELECT * FROM annotations
-    WHERE use_case = ${useCase} AND scenario_id = ${scenarioId}
+    WHERE use_case = ${useCase} AND scenario_id = ${scenarioId} AND dataset_id = ${datasetId}
     ORDER BY created_at DESC
   `;
   return rows as Annotation[];
@@ -292,6 +300,8 @@ export type CodeApplication = {
   language: string;
   policy_label: string;
   annotator_name: string;
+  /** See Annotation.dataset_id -- same scoping, same reason. */
+  dataset_id: string | null;
   code_id: number;
   target_field: string;
   quote_text: string | null;
@@ -311,6 +321,8 @@ export type NewCodeApplication = {
   language: string;
   policyLabel: string;
   annotatorName: string;
+  /** See NewAnnotation.datasetId -- same scoping, same reason. */
+  datasetId: string;
   codeId: number;
   targetField: string;
   quoteText: string | null;
@@ -321,10 +333,10 @@ export async function insertCodeApplication(input: NewCodeApplication): Promise<
   const sql = getSql();
   const rows = await sql`
     INSERT INTO code_applications (
-      scenario_id, use_case, language, policy_label, annotator_name,
+      scenario_id, use_case, language, policy_label, annotator_name, dataset_id,
       code_id, target_field, quote_text, note
     ) VALUES (
-      ${input.scenarioId}, ${input.useCase}, ${input.language}, ${input.policyLabel}, ${input.annotatorName},
+      ${input.scenarioId}, ${input.useCase}, ${input.language}, ${input.policyLabel}, ${input.annotatorName}, ${input.datasetId},
       ${input.codeId}, ${input.targetField}, ${input.quoteText}, ${input.note}
     )
     RETURNING *
@@ -332,13 +344,13 @@ export async function insertCodeApplication(input: NewCodeApplication): Promise<
   return rows[0] as CodeApplication;
 }
 
-export async function listCodeApplications(useCase: UseCase, scenarioId: string): Promise<CodeApplicationWithCode[]> {
+export async function listCodeApplications(useCase: UseCase, scenarioId: string, datasetId: string): Promise<CodeApplicationWithCode[]> {
   const sql = getSql();
   const rows = await sql`
     SELECT ca.*, cc.name AS code_name, cc.theme AS code_theme
     FROM code_applications ca
     JOIN codebook_codes cc ON cc.id = ca.code_id
-    WHERE ca.use_case = ${useCase} AND ca.scenario_id = ${scenarioId}
+    WHERE ca.use_case = ${useCase} AND ca.scenario_id = ${scenarioId} AND ca.dataset_id = ${datasetId}
     ORDER BY ca.created_at DESC
   `;
   return rows as CodeApplicationWithCode[];

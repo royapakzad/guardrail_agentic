@@ -47,9 +47,9 @@ export default async function ScenarioDetailPage({
   let reviewDbError: string | null = null;
   try {
     [annotations, codes, codeApplications] = await Promise.all([
-      listAnnotations(useCase, id),
+      listAnnotations(useCase, id, String(datasetId)),
       listCodebookCodes(useCase),
-      listCodeApplications(useCase, id),
+      listCodeApplications(useCase, id, String(datasetId)),
     ]);
   } catch (err) {
     reviewDbError = err instanceof Error ? err.message : "Could not load saved reviews";
@@ -212,7 +212,7 @@ export default async function ScenarioDetailPage({
                 ))}
               </div>
             )}
-            <ScenarioReviewForm useCase={useCase} scenarioId={id} language={reviewLanguage} policyLabel={reviewPolicyLabel} codes={codes} />
+            <ScenarioReviewForm useCase={useCase} scenarioId={id} language={reviewLanguage} policyLabel={reviewPolicyLabel} datasetId={String(datasetId)} codes={codes} />
           </>
         )}
       </StepSection>
