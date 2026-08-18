@@ -859,7 +859,9 @@ def dispatch_tool_call(name: str, arguments_json: str) -> str:
             return json.dumps({"error": str(exc)})
 
 
-def _http_json(url: str, *, params: dict | None = None, timeout: int = 20) -> Any:
+def _http_json(
+    url: str, *, params: dict | None = None, timeout: int = 20, headers: dict | None = None
+) -> Any:
     """GET a URL and return parsed JSON, raising ToolError on any failure."""
     try:
         import requests
@@ -870,7 +872,10 @@ def _http_json(url: str, *, params: dict | None = None, timeout: int = 20) -> An
             url,
             params=params,
             timeout=timeout,
-            headers={"User-Agent": "guardrail-agentic (research; +https://mozilla.ai)"},
+            headers={
+                "User-Agent": "guardrail-agentic (research; +https://mozilla.ai)",
+                **(headers or {}),
+            },
         )
         resp.raise_for_status()
         return resp.json()
@@ -1659,9 +1664,23 @@ TOOL_GROUPS["financial"] = TOOL_GROUPS["default"] + [
 
 
 # ══ Cybersecurity / social-engineering domain tools (Issue #25) ═══════════════
-# urlscan_check: free URLScan.io search API — no auth required for search
-# (only submitting a *new* scan needs URLSCAN_API_KEY, which this tool does
-# not do). scam_guidance_lookup: a curated, embedded index — no HTTP call.
+# urlscan_check: free URLScan.io search API — no auth required for search.
+# scam_guidance_lookup: a curated, embedded index — no HTTP call.
+#
+# Bug fix (reported by an annotator during labelling, scenario 15,
+# https://kkgt.3e558.sod777.com/): the search API's compact result items do
+# not reliably embed a populated `verdicts` object -- for a URL that HAS a
+# prior scan, `verdicts` can come back entirely null even though the scan
+# itself found the URL malicious. Reading `overall.malicious` off of that (the
+# old behavior) then silently returns malicious=None -- indistinguishable from
+# "checked, found clean" to a judge reading the tool result, when in fact
+# URLScan was never asked for the real verdict. GET /api/v1/result/{uuid}/
+# has the actual verdicts (overall + engines/ML + community), but is
+# auth-walled even for scans that already exist and are public on the HTML
+# result page -- confirmed empirically, contrary to this function's original
+# assumption that only *submitting new* scans needs a key. If URLSCAN_API_KEY
+# is set, urlscan_check() now falls back to that authenticated endpoint
+# whenever the search hit's own embedded verdict is inconclusive.
 
 _SCAM_GUIDANCE_INDEX: dict[str, dict] = {
     "verification_code": {
@@ -1745,13 +1764,55 @@ _SCAM_GUIDANCE_INDEX: dict[str, dict] = {
 }
 
 
+# URLScan verdicts can come from up to four independent sources; "overall"
+# alone can under-report because it doesn't always fold in the ML "engines"
+# verdict or the community verdict (e.g. a scan that 404s live can still sit
+# on a domain with a history of phishing pages, flagged only by "engines").
+# Check every source and take the worst, matching how URLScan's own web UI
+# and community tooling interpret a result.
+_URLSCAN_VERDICT_SOURCES = ("overall", "urlscan", "engines", "community")
+
+
+def _extract_urlscan_verdict(verdicts: dict | None) -> tuple[Optional[bool], Optional[float], bool]:
+    """
+    Reduce a URLScan `verdicts` object across all four sources.
+
+    Returns (malicious, score, has_data):
+      malicious — True if ANY source flags malicious, else False if at least
+                  one source has actual verdict data (hasVerdicts / a score /
+                  an explicit malicious flag) and none flagged malicious,
+                  else None if no source has any data at all.
+      score     — the highest score across all sources, or None if none scored.
+      has_data  — True if at least one source carried real verdict data. When
+                  False, `malicious=None` is a data gap, not a clean result —
+                  callers should not treat it as "checked, found safe".
+    """
+    verdicts = verdicts or {}
+    any_malicious = False
+    max_score: Optional[float] = None
+    has_data = False
+    for source in _URLSCAN_VERDICT_SOURCES:
+        v = verdicts.get(source) or {}
+        if v.get("hasVerdicts") or v.get("malicious") is not None or v.get("score"):
+            has_data = True
+        if v.get("malicious"):
+            any_malicious = True
+        score = v.get("score")
+        if score is not None:
+            max_score = score if max_score is None else max(max_score, score)
+    if not has_data:
+        return None, None, False
+    return any_malicious, max_score, True
+
+
 def urlscan_check(url: str) -> dict:
     """
-    Search URLScan.io's public scan database for a URL (free, no-auth search API).
+    Look up URLScan.io's verdict for a URL: free search API first, falling
+    back to the authenticated result endpoint (if URLSCAN_API_KEY is set)
+    when the search hit exists but doesn't carry a usable verdict.
 
-    Returns the most recent existing scan's malicious/benign verdict and tags if
-    one exists. Does NOT submit a new scan and does NOT fetch/execute the URL's
-    content — this only queries URLScan's own database of prior scans.
+    Does NOT submit a new scan and does NOT fetch/execute the URL's content
+    itself — only reads URLScan's own database of prior scans.
     """
     url = url.strip()
     if not url:
@@ -1784,25 +1845,55 @@ def urlscan_check(url: str) -> dict:
 
     top = results[0]
     task = top.get("task") or {}
-    overall = (top.get("verdicts") or {}).get("overall") or {}
-    malicious = overall.get("malicious")
     scan_id = top.get("_id", "")
-    note = (
-        "URLScan flags this URL as MALICIOUS — treat as a confirmed phishing/malware red flag."
-        if malicious
-        else (
-            "URLScan has scanned this URL before and found no malicious verdict "
-            "(not an absolute guarantee of safety)."
+    scan_report_url = f"https://urlscan.io/result/{scan_id}/" if scan_id else ""
+    malicious, score, has_data = _extract_urlscan_verdict(top.get("verdicts"))
+    verdict_source = "search"
+
+    # The search hit exists but carries no usable verdict data (this is the
+    # bug: URLScan's search index doesn't always embed `verdicts`, even for a
+    # URL that IS flagged malicious in the full result). Escalate to the
+    # authenticated result endpoint if a key is configured.
+    api_key = os.environ.get("URLSCAN_API_KEY", "").strip()
+    if not has_data and scan_id and api_key:
+        try:
+            full_result = _http_json(
+                f"https://urlscan.io/api/v1/result/{scan_id}/",
+                headers={"API-Key": api_key},
+            )
+            malicious, score, has_data = _extract_urlscan_verdict(full_result.get("verdicts"))
+            verdict_source = "authenticated_result"
+        except ToolError:
+            pass  # keep the inconclusive search-hit result; note below reflects it
+
+    if not has_data:
+        note = (
+            "URLScan has a prior scan for this URL, but neither the search index nor "
+            + ("the authenticated result endpoint" if api_key else "an authenticated result fetch")
+            + " returned verdict data for it"
+            + ("." if api_key else " (no URLSCAN_API_KEY configured to check the full result).")
+            + " This is absence of data, not evidence the URL is safe."
         )
-    )
+    elif malicious:
+        note = (
+            "URLScan flags this URL as MALICIOUS — treat as a confirmed phishing/malware red flag."
+            + (" (confirmed via authenticated result fetch.)" if verdict_source == "authenticated_result" else "")
+        )
+    else:
+        note = (
+            "URLScan has scanned this URL before and found no malicious verdict across "
+            "overall/urlscan/engines/community sources (not an absolute guarantee of safety)."
+        )
+
     return {
         "url": url,
         "found": True,
         "malicious": malicious,
-        "score": overall.get("score"),
+        "score": score,
         "tags": task.get("tags") or [],
-        "scan_report_url": f"https://urlscan.io/result/{scan_id}/" if scan_id else "",
+        "scan_report_url": scan_report_url,
         "scan_date": task.get("time", ""),
+        "verdict_source": verdict_source if has_data else "none",
         "note": note,
     }
 
