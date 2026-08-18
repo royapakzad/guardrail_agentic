@@ -240,8 +240,17 @@ class ScenarioLogger:
         input_args: dict,
         result_raw: str,
         check_purpose: str = "",
+        criterion: str = "",
     ) -> None:
-        """Log one tool call and its full result."""
+        """Log one tool call and its full result.
+
+        criterion: the model-supplied criterion tag this call was made for
+        (now a required argument on every tool — see tools.py's _register).
+        Recorded here so a human reading the log can see which criterion each
+        tool call was meant to support, alongside the code-computed
+        tools_used_verified check in the final judgment (agentic_runner.py's
+        _verify_tool_criterion_links).
+        """
         try:
             result_parsed = json.loads(result_raw)
         except (json.JSONDecodeError, ValueError):
@@ -250,6 +259,7 @@ class ScenarioLogger:
         entry = {
             "call_number": call_number,
             "tool": tool_name,
+            "criterion": criterion,
             "check_purpose": check_purpose,
             "timestamp": datetime.now().isoformat(),
             "input": input_args,
@@ -263,6 +273,8 @@ class ScenarioLogger:
         result_display = json.dumps(result_parsed, indent=2, ensure_ascii=False, default=str)
 
         self._write(_divider(f"Tool Call #{call_number} — {tool_name}"))
+        if criterion:
+            self._write(f"  CRITERION : {criterion}")
         if check_purpose:
             self._write(f"  CHECK  : {check_purpose}")
         self._write(f"  INPUT  : {json.dumps(input_args, ensure_ascii=False)}")

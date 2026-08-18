@@ -644,6 +644,25 @@ class Tool:
 
 REGISTRY: dict[str, Tool] = {}
 
+# Injected into every tool's schema by _register() below, rather than
+# repeated in each schema literal, so it can never drift out of sync as new
+# tools are added. Required (not optional) so the tool-calling machinery
+# itself enforces that every call names its criterion -- an LLM asked nicely
+# in a system prompt to "please always include X" skips it under budget
+# pressure often enough that a required schema field is the only reliable
+# way to get it consistently logged in tool_call_log (see
+# _verify_tool_criterion_links, which cross-checks a criterion's
+# self-reported tools_used against what was actually tagged here).
+_CRITERION_PARAM_SCHEMA: dict = {
+    "type": "string",
+    "description": (
+        "The exact numbered criterion name this call is gathering evidence for "
+        "-- copied verbatim from its numbered heading in the policy (same words, "
+        "same punctuation, no added numbering). Used to verify that each "
+        "criterion's stated tools_used matches the tool calls actually made for it."
+    ),
+}
+
 # check_acronym is intentionally left out of the live default tool list.
 # agentic_runner._prerun_acronym_checks_parallel already verifies every
 # regex-extractable acronym+expansion pair before the tool loop starts, at
@@ -664,6 +683,12 @@ TOOL_GROUPS: dict[str, list[str]] = {
 
 def _register(schema: dict, handler: Callable[[dict], Any]) -> None:
     name = schema["function"]["name"]
+    params = schema["function"].setdefault("parameters", {})
+    props = params.setdefault("properties", {})
+    props.setdefault("criterion", dict(_CRITERION_PARAM_SCHEMA))
+    required = params.setdefault("required", [])
+    if "criterion" not in required:
+        required.append("criterion")
     REGISTRY[name] = Tool(schema=schema, handler=handler)
 
 

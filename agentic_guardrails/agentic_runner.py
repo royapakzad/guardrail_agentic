@@ -30,6 +30,7 @@ Exports:
 from __future__ import annotations
 
 import concurrent.futures
+import difflib
 import json
 import re
 import time
@@ -481,7 +482,11 @@ def build_agentic_guardrail_system_prompt(
         "a more specific tool below already covers the claim.\n\n"
         "You have access to these tools:\n"
         + _describe_tools_for_prompt(tool_group)
-        + "\n\n=== POLICY ===\n"
+        + "\n\nEVERY tool call also requires a `criterion` argument: the exact numbered "
+        "criterion name (copied verbatim from its heading below) that call is gathering "
+        "evidence for. This is how tool evidence gets verified against the criterion "
+        "verdict it supposedly supports — do not leave it blank or reuse one criterion's "
+        "name for a call that actually serves another.\n\n=== POLICY ===\n"
         + policy.strip()
         + "\n\n=== RUBRIC ===\n"
         + rubric.strip()
@@ -647,7 +652,11 @@ def build_agentic_guardrail_system_prompt_full_policy(
         "criterion's verdict.\n\n"
         "You have access to these tools:\n"
         + _describe_tools_for_prompt(tool_group)
-        + "\n\n=== POLICY ===\n"
+        + "\n\nEVERY tool call also requires a `criterion` argument: the exact numbered "
+        "criterion name (copied verbatim from its heading below) that call is gathering "
+        "evidence for. This is how tool evidence gets verified against the criterion "
+        "verdict it supposedly supports — do not leave it blank or reuse one criterion's "
+        "name for a call that actually serves another.\n\n=== POLICY ===\n"
         + policy.strip()
         + "\n\n=== RUBRIC ===\n"
         + rubric.strip()
@@ -1381,6 +1390,9 @@ def run_agentic_guardrail(
             # to the tool-requiring subset, so these are merged with the full
             # non-agentic judgment there (_merge_split_criteria) rather than here.
             agentic_criteria_verdicts: list[dict] = j.get("criteria_verdicts") or []
+            agentic_criteria_verdicts = _verify_tool_criterion_links(
+                agentic_criteria_verdicts, tool_call_log
+            )
             agentic_tool_changed: list[str] = j.get("tool_changed_verdict_for") or []
 
             return AgenticJudgment(
@@ -1513,10 +1525,17 @@ def run_agentic_guardrail(
                 except (json.JSONDecodeError, AttributeError):
                     sources_used.append(f"acronym: {acronym!r} → error")
 
+            # The model-supplied criterion tag (now a required schema field on
+            # every tool, see tools.py's _register) — recorded here so
+            # tool_call_log can later be cross-checked against each
+            # criterion's self-reported tools_used (_verify_tool_criterion_links).
+            criterion_tag = str(args_parsed.get("criterion", "") or "").strip()
+
             check_purpose = TOOL_CHECK_PURPOSE.get(tool_name, "General verification")
             tool_call_log.append({
                 "call_number": tool_calls_made,
                 "tool": tool_name,
+                "criterion": criterion_tag,
                 "check_purpose": check_purpose,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "input": args_parsed,
@@ -1527,6 +1546,7 @@ def run_agentic_guardrail(
                 logger.log_tool_call(
                     call_number=tool_calls_made,
                     tool_name=tool_name,
+                    criterion=criterion_tag,
                     check_purpose=check_purpose,
                     input_args=args_parsed,
                     result_raw=result_str,
@@ -1569,6 +1589,75 @@ _TRAILING_ANNOTATION_RE = re.compile(r'\s*[\(\[][^)\]]*[\)\]]\s*$')
 
 def _normalize_criterion_name(name: str) -> str:
     return _TRAILING_ANNOTATION_RE.sub("", name).strip()
+
+
+# Below this normalized-similarity ratio, a tool call's free-text `criterion`
+# tag is treated as not matching any criteria_verdicts entry at all (rather
+# than being force-matched to the closest one), so a garbled or off-topic tag
+# shows up as zero tagged tools instead of silently crediting the wrong
+# criterion.
+_CRITERION_FUZZY_MATCH_THRESHOLD = 0.6
+
+
+def _verify_tool_criterion_links(
+    criteria_verdicts: list[dict],
+    tool_call_log: list[dict],
+) -> list[dict]:
+    """
+    Cross-check each criterion's self-reported `tools_used` against the tool
+    calls actually tagged with that criterion in tool_call_log, via the
+    `criterion` argument every tool call now carries (a required field on
+    every tool schema — see tools.py's _register).
+
+    This is a code-computed check, not another LLM claim: `tools_used` and
+    `human_review_needed` are the judge's own account of what it did: this
+    function is what actually verifies that account against what it called.
+
+    Adds two fields to each criteria_verdicts entry:
+      tools_actually_tagged — tool names from tool_call_log whose `criterion`
+                               argument matches this criterion (ground truth).
+                               Fuzzy-matched (see _CRITERION_FUZZY_MATCH_THRESHOLD)
+                               since the model's free-text tag on the tool call
+                               and its final criterion string are both its own
+                               writing, not guaranteed to be byte-identical.
+      tools_used_verified   — True only if every tool named in tools_used has
+                               a matching tagged call for this criterion; False
+                               whenever tools_used is non-empty and that isn't
+                               true (including when tools_used is non-empty but
+                               nothing was tagged to this criterion at all).
+    """
+    by_criterion: dict[str, list[str]] = {}
+    for tc in tool_call_log:
+        tag = _normalize_criterion_name(str(tc.get("criterion", "") or ""))
+        if tag:
+            by_criterion.setdefault(tag, []).append(tc.get("tool", ""))
+
+    def _tagged_tools_for(criterion_name: str) -> list[str]:
+        norm = _normalize_criterion_name(criterion_name)
+        if norm in by_criterion:
+            return by_criterion[norm]
+        best_key, best_ratio = None, 0.0
+        for key in by_criterion:
+            ratio = difflib.SequenceMatcher(None, norm.lower(), key.lower()).ratio()
+            if ratio > best_ratio:
+                best_key, best_ratio = key, ratio
+        if best_key is not None and best_ratio >= _CRITERION_FUZZY_MATCH_THRESHOLD:
+            return by_criterion[best_key]
+        return []
+
+    verified: list[dict] = []
+    for cv in criteria_verdicts:
+        cv = dict(cv)
+        tagged_tools = _tagged_tools_for(cv.get("criterion", ""))
+        claimed_tools = cv.get("tools_used") or []
+        if not isinstance(claimed_tools, list):
+            claimed_tools = []
+        cv["tools_actually_tagged"] = sorted({t for t in tagged_tools if t})
+        cv["tools_used_verified"] = bool(claimed_tools) and set(claimed_tools).issubset(
+            set(tagged_tools)
+        )
+        verified.append(cv)
+    return verified
 
 
 def _merge_split_criteria(
