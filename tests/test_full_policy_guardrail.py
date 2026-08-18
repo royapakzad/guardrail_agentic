@@ -226,7 +226,7 @@ def test_full_policy_prompt_distinguishes_marked_and_unmarked():
     )
     assert "MARKED" in prompt
     assert "UNMARKED" in prompt
-    assert "Do NOT call any tool for an UNMARKED criterion" in prompt
+    assert "Do NOT call any tool" in prompt and "for an UNMARKED criterion" in prompt
 
 
 def test_full_policy_prompt_lists_actual_tools_for_domain():
@@ -236,6 +236,23 @@ def test_full_policy_prompt_lists_actual_tools_for_domain():
     assert "entity_registration" in prompt
     assert "sanctions_screen" in prompt
     assert "reliefweb_situation" not in prompt  # humanitarian-only tool
+
+
+def test_full_policy_prompt_does_not_narrow_verification_to_generic_tools_only():
+    """Regression coverage: the framing paragraph and the tool-signal list must
+    point the judge at whichever tool applies -- generic (search/URL/acronym)
+    or this domain's specialized tools (sanctions, registration, URL
+    reputation, crypto address, ...) -- not just the four generic checks, or a
+    financial/cybersecurity judge could under-use broker_license_check,
+    sanctions_screen, urlscan_check, etc. in favor of generic search_web."""
+    prompt = build_agentic_guardrail_system_prompt_full_policy(
+        policy="1. TEST (potentially needs tool calls)\n- desc", rubric="r",
+        tool_group="financial",
+    )
+    assert "specialized tools" in prompt
+    assert "sanctions" in prompt.lower()
+    assert "do not default to generic web search" in prompt.lower()
+    assert "domain-specific tool result" in prompt
 
 
 def test_full_policy_prompt_embeds_policy_with_tags_intact():
