@@ -76,11 +76,13 @@ export async function listAnnotations(useCase: UseCase, scenarioId: string, data
   return rows as Annotation[];
 }
 
-export async function listAnnotationsForUseCase(useCase: UseCase): Promise<Annotation[]> {
+/** Scoped to one dataset, same reasoning as listCodeApplicationsForUseCase --
+ * see schema.sql's dataset_id migration note. */
+export async function listAnnotationsForUseCase(useCase: UseCase, datasetId: string): Promise<Annotation[]> {
   const sql = getSql();
   const rows = await sql`
     SELECT * FROM annotations
-    WHERE use_case = ${useCase}
+    WHERE use_case = ${useCase} AND dataset_id = ${datasetId}
     ORDER BY created_at DESC
   `;
   return rows as Annotation[];
@@ -356,13 +358,18 @@ export async function listCodeApplications(useCase: UseCase, scenarioId: string,
   return rows as CodeApplicationWithCode[];
 }
 
-export async function listCodeApplicationsForUseCase(useCase: UseCase): Promise<CodeApplicationWithCode[]> {
+/** Scoped to one dataset, same as listCodeApplications -- see schema.sql's
+ * dataset_id migration note. Before this took datasetId, the codebook page
+ * and dashboard aggregated code applications across every dataset ever
+ * uploaded for the use case, so re-annotating a freshly uploaded run still
+ * showed codes applied against an older, unrelated run. */
+export async function listCodeApplicationsForUseCase(useCase: UseCase, datasetId: string): Promise<CodeApplicationWithCode[]> {
   const sql = getSql();
   const rows = await sql`
     SELECT ca.*, cc.name AS code_name, cc.theme AS code_theme
     FROM code_applications ca
     JOIN codebook_codes cc ON cc.id = ca.code_id
-    WHERE ca.use_case = ${useCase}
+    WHERE ca.use_case = ${useCase} AND ca.dataset_id = ${datasetId}
     ORDER BY ca.created_at DESC
   `;
   return rows as CodeApplicationWithCode[];

@@ -56,7 +56,7 @@ export default async function UseCaseDashboard({
   const acronymChecks = computeAcronymChecks(records);
   const languageFlips = computeLanguageFlips(useCase, records);
   const domainUsage = computeDomainUsage(records);
-  const codeApplications = await listCodeApplicationsForUseCase(useCase).catch(() => []);
+  const codeApplications = await listCodeApplicationsForUseCase(useCase, String(datasetId)).catch(() => []);
 
   const codeFrequency = new Map<string, number>();
   const themeByCode = new Map<string, string>();

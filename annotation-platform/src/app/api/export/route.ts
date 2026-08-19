@@ -137,8 +137,8 @@ export async function GET(request: NextRequest) {
     const datasetId = await resolveDatasetIdParam(useCase, datasetParam);
     const [records, annotations, codeApplications] = await Promise.all([
       getRecordsForDataset(useCase, datasetId),
-      listAnnotationsForUseCase(useCase),
-      listCodeApplicationsForUseCase(useCase),
+      listAnnotationsForUseCase(useCase, String(datasetId)),
+      listCodeApplicationsForUseCase(useCase, String(datasetId)),
     ]);
 
     // Every language variant of one scenario id (e.g. "IR01" in en + fa).

@@ -153,7 +153,7 @@ export function CodebookCodeCard({ code, applications }: Props) {
           {applications.map((a) => (
             <div key={a.id} className="text-xs text-slate-600 dark:text-slate-400">
               <Link
-                href={`/${a.use_case}/scenarios/${encodeURIComponent(a.scenario_id)}?lang=${a.language}`}
+                href={`/${a.use_case}/scenarios/${encodeURIComponent(a.scenario_id)}?lang=${a.language}${a.dataset_id ? `&dataset=${encodeURIComponent(a.dataset_id)}` : ""}`}
                 className="font-medium text-sky-700 dark:text-sky-400 underline"
               >
                 {a.scenario_id}
