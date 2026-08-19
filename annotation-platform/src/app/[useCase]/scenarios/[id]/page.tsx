@@ -324,7 +324,7 @@ function CriterionRows({
             <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Criterion</th>
             <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">No tools</th>
             <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">With tools</th>
-            <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Tools used / influenced</th>
+            <th className="px-3 py-2 font-medium text-slate-600 dark:text-slate-400">Tools used / influenced / verified</th>
           </tr>
         </thead>
         <tbody>
@@ -398,9 +398,17 @@ function CriterionRows({
                   </div>
                 </td>
                 <td className="px-3 py-2">
-                  <div className="flex flex-col gap-1">
-                    <ToolChips tools={row.agentic.tools_used} toolTagged={row.toolTagged} />
-                    <ToolInfluencedTag toolInfluenced={row.agentic.tool_influenced} />
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Claimed (self-reported)</span>
+                      <ToolChips tools={row.agentic.tools_used} toolTagged={row.toolTagged} />
+                      <ToolInfluencedTag toolInfluenced={row.agentic.tool_influenced} />
+                    </div>
+                    <div className="flex flex-col gap-1 border-t border-slate-100 pt-1 dark:border-slate-800">
+                      <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Verified (from tool_call_log)</span>
+                      <ToolChips tools={row.agentic.tools_actually_tagged} toolTagged={row.toolTagged} />
+                      <ToolsUsedVerifiedTag verified={row.agentic.tools_used_verified} />
+                    </div>
                   </div>
                 </td>
               </tr>
@@ -490,6 +498,21 @@ function ToolInfluencedTag({ toolInfluenced }: { toolInfluenced?: boolean }) {
     return <span className="text-[10px] text-slate-400 dark:text-slate-500">tool_influenced: false</span>;
   }
   return <span className="text-[10px] italic text-slate-300 dark:text-slate-600">tool_influenced: not reported</span>;
+}
+
+/** Renders the raw `tools_used_verified` field, verbatim -- computed
+ * server-side (agentic_runner._verify_tool_criterion_links) by cross-checking
+ * the judge's claimed tools_used against tool_call_log's real, criterion-
+ * tagged calls. false means the judge claimed a tool that isn't backed by an
+ * actual tagged call for this criterion -- worth an annotator's attention. */
+function ToolsUsedVerifiedTag({ verified }: { verified?: boolean }) {
+  if (verified === true) {
+    return <span className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400">tools_used_verified: true</span>;
+  }
+  if (verified === false) {
+    return <span className="text-[10px] font-medium text-red-700 dark:text-red-400">tools_used_verified: false</span>;
+  }
+  return <span className="text-[10px] italic text-slate-300 dark:text-slate-600">tools_used_verified: not reported</span>;
 }
 
 function Evidence({ criterion }: { criterion: CriterionVerdict }) {

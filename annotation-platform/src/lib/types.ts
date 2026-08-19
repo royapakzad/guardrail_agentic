@@ -12,8 +12,19 @@ export type CriterionVerdict = {
   /** @deprecated superseded by suggested_improvement; kept for older runs */
   improvements?: string[];
   tool_influenced?: boolean;
-  /** Tool names the judge reports it called to evaluate this specific criterion. */
+  /** Tool names the judge SELF-REPORTS it called for this criterion (its own
+   * claim, from criteria_verdicts JSON). */
   tools_used?: string[];
+  /** Ground truth: tool names actually tagged to this criterion in
+   * tool_call_log, computed server-side by
+   * agentic_runner._verify_tool_criterion_links -- independent of what the
+   * judge claims in tools_used. */
+  tools_actually_tagged?: string[];
+  /** True only if every tool named in tools_used has a matching tagged call
+   * in tool_call_log for this criterion; false on any overclaim (including
+   * a non-empty tools_used with nothing actually tagged). Absent on records
+   * from before this verification existed. */
+  tools_used_verified?: boolean;
   [key: string]: unknown;
 };
 
