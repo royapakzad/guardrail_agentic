@@ -257,8 +257,11 @@ function AlignmentFields({
       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
       <fieldset>
         <legend className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-          Which guardrail judgment do you find more reliable and trustworthy?
+          For criteria the policy tags as potentially needing tool calls, which guardrail judgment do you find more reliable and trustworthy?
         </legend>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mb-1.5">
+          Base your answer on each judge&apos;s explanation and on the tools it actually called for those criteria (see the &ldquo;Tool-tagged&rdquo; rows and the Claimed/Verified tool info in the compliance table above) — not on the verdict alone.
+        </p>
         <div className="flex flex-col gap-1.5 text-sm">
           {JUDGMENT_ALIGNMENT_OPTIONS.map((option) => (
             <label key={option} className="flex items-center gap-1.5">
