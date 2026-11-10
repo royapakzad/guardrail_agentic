@@ -2,7 +2,7 @@
 
 A research toolkit for studying how LLM safety guardrails behave across languages, and whether giving a guardrail agentic capabilities (web search, URL checks, domain-specific lookups) changes its judgments compared to a guardrail that relies only on built-in knowledge.
 
-Scenarios from three high-stakes domains are sent to an assistant LLM. A guardrail judge scores each response twice against the same policy, once without tools and once with tools, so the effect of tool access can be compared row by row. The three domains are:
+Scenarios from three high-stakes domains are sent to an assistant LLM. A guardrail judge scores each response twice against the same policy, once without tools and once with tools, so the effect of tool access can be compared. The three domains are:
 - **Humanitarian:** Iran asylum cases, in English and Farsi
 - **Financial:** in English and Spanish
 - **Cybersecurity/social engineering:** phishing, in English and Spanish
@@ -66,5 +66,3 @@ Run `python agentic_guardrails/run_agentic_comparison.py --help` for all options
 ## Results
 
 The final outputs for all three domains are in `data/output/` (`*_guardrails_output.json`). Human annotation exports are in `data/output/annotators_analysis/`. The `annotation-platform/` directory contains the web app used for annotation.
-
-For the full original documentation (pipeline details, output columns, tools, troubleshooting), see [README_old.md](README_old.md).
