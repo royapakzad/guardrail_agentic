@@ -1,4 +1,4 @@
-# Multilingual LLM Guardrail Evaluation
+# Multilingual Agentic Guardrail Evaluation
 
 A research toolkit for studying how LLM safety guardrails behave across languages, and whether giving a guardrail agentic capabilities (web search, URL checks, domain-specific lookups) changes its judgments compared to a guardrail that relies only on built-in knowledge.
 
